@@ -22,8 +22,10 @@ enum DashboardSessionStore {
 
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
+            kSecUseDataProtectionKeychain: true,
             kSecAttrService: service,
             kSecAttrAccount: session.storageKey,
+            kSecAttrAccessible: kSecAttrAccessibleWhenUnlocked,
             kSecValueData: data,
         ]
 
@@ -36,6 +38,7 @@ enum DashboardSessionStore {
     static func clear() throws {
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
+            kSecUseDataProtectionKeychain: true,
             kSecAttrService: service,
         ]
 
@@ -48,6 +51,7 @@ enum DashboardSessionStore {
     static func clear(storageKey: String) throws {
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
+            kSecUseDataProtectionKeychain: true,
             kSecAttrService: service,
             kSecAttrAccount: storageKey,
         ]
@@ -72,9 +76,9 @@ enum DashboardSessionStore {
     private static func loadSessions(service: String) throws -> [DashboardSession] {
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
+            kSecUseDataProtectionKeychain: true,
             kSecAttrService: service,
             kSecReturnData: true,
-            kSecReturnAttributes: true,
             kSecMatchLimit: kSecMatchLimitAll,
         ]
 
@@ -84,15 +88,15 @@ enum DashboardSessionStore {
         case errSecItemNotFound:
             return []
         case errSecSuccess:
-            guard let rows = item as? [[String: Any]] else {
-                throw DashboardError.invalidSessionData
-            }
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            return try rows.compactMap { row -> DashboardSession? in
-                guard let data = row[kSecValueData as String] as? Data else { return nil }
-                return try decoder.decode(DashboardSession.self, from: data)
+            if let rows = item as? [Data] {
+                return try rows.map { try decoder.decode(DashboardSession.self, from: $0) }
             }
+            if let data = item as? Data {
+                return [try decoder.decode(DashboardSession.self, from: data)]
+            }
+            throw DashboardError.invalidSessionData
         default:
             throw DashboardError.keychain(status)
         }

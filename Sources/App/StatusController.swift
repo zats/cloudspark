@@ -14,8 +14,8 @@ final class StatusController: NSObject, NSMenuDelegate {
     private let menu = NSMenu()
     private let workersPagesMenu = NSMenu()
     private let summaryItem = NSMenuItem(title: "Cloudflare", action: nil, keyEquivalent: "")
-    private let workersPagesItem = NSMenuItem(title: "Workers & Pages", action: nil, keyEquivalent: "")
-    private let refreshItem = NSMenuItem(title: "Refresh Data", action: #selector(refreshBuilds), keyEquivalent: "r")
+    private let workersPagesItem = NSMenuItem(title: "Workers", action: nil, keyEquivalent: "")
+    private let refreshItem = NSMenuItem(title: "Refresh", action: #selector(refreshBuilds), keyEquivalent: "r")
     private let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
     private let quitItem = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
 
@@ -24,6 +24,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     private lazy var settingsController = SettingsWindowController()
     private var endpointTimers: [Endpoint: Timer] = [:]
     private var endpointTasks: [Endpoint: Task<Void, Never>] = [:]
+    private var summaryTimer: Timer?
     private weak var highlightedWorkersPagesItem: NSMenuItem?
 
     private var overviewProjectsByID: [String: DashboardProject] = [:]
@@ -35,6 +36,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     private var hasLoadedLatestBuilds = false
     private var hasLoadedWorkerMetrics = false
     private var hasLoadedPageDeployments = false
+    private var lastRefreshedAt: Date?
     private var sessions: [DashboardSession] = []
     private var sessionTask: Task<DashboardSession, Error>?
     private var didRequestStartupLogin = false
@@ -44,6 +46,7 @@ final class StatusController: NSObject, NSMenuDelegate {
         configureMenu()
         statusItem.menu = menu
         updateSummary("Idle")
+        startSummaryTimer()
         scheduleRefresh()
         if sessions.isEmpty {
             presentSettings(selectedTab: .accounts, triggerLogin: true)
@@ -51,7 +54,8 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
 
     private func configureMenu() {
-        statusItem.button?.title = "CF"
+        statusItem.button?.image = NSImage(systemSymbolName: "cloud.fill", accessibilityDescription: AppBundle.name)
+        statusItem.button?.imagePosition = .imageOnly
 
         summaryItem.isEnabled = false
         menu.addItem(summaryItem)
@@ -83,7 +87,9 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
 
     private func setStatusCount(_ count: Int?) {
-        statusItem.button?.title = count.map { "CF \($0)" } ?? "CF"
+        statusItem.button?.image = NSImage(systemSymbolName: "cloud.fill", accessibilityDescription: AppBundle.name)
+        statusItem.button?.imagePosition = .imageOnly
+        statusItem.button?.title = ""
     }
 
     private func scheduleRefresh() {
@@ -116,6 +122,17 @@ final class StatusController: NSObject, NSMenuDelegate {
         endpointTasks.removeAll()
     }
 
+    private func startSummaryTimer() {
+        summaryTimer?.invalidate()
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.updateBuildSelectionAndSummary()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        summaryTimer = timer
+    }
+
     private func resetRefreshState() {
         projects = []
         overviewProjectsByID = [:]
@@ -126,6 +143,7 @@ final class StatusController: NSObject, NSMenuDelegate {
         hasLoadedLatestBuilds = false
         hasLoadedWorkerMetrics = false
         hasLoadedPageDeployments = false
+        lastRefreshedAt = nil
         highlightedWorkersPagesItem = nil
         rebuildWorkersPagesMenu()
         setStatusCount(nil)
@@ -198,6 +216,7 @@ final class StatusController: NSObject, NSMenuDelegate {
                     }
                     overviewProjectsByID = nextOverviewProjectsByID
                     hasLoadedOverview = true
+                    lastRefreshedAt = Date()
                     rebuildProjectsFromSnapshots()
 
                     Task { @MainActor in
@@ -229,6 +248,7 @@ final class StatusController: NSObject, NSMenuDelegate {
                     notifyAboutBuildChanges(from: previousBuilds, to: nextBuilds)
                     latestBuildsByID = nextBuilds
                     hasLoadedLatestBuilds = true
+                    lastRefreshedAt = Date()
                     rebuildProjectsFromSnapshots()
 
                 case .workerMetrics:
@@ -242,6 +262,7 @@ final class StatusController: NSObject, NSMenuDelegate {
                     }
                     workerMetricsByID = nextWorkerMetricsByID
                     hasLoadedWorkerMetrics = true
+                    lastRefreshedAt = Date()
                     rebuildProjectsFromSnapshots()
 
                 case .pageDeployments:
@@ -262,6 +283,7 @@ final class StatusController: NSObject, NSMenuDelegate {
                     }
                     pageDeploymentsByID = nextPageDeploymentsByID
                     hasLoadedPageDeployments = true
+                    lastRefreshedAt = Date()
                     rebuildProjectsFromSnapshots()
                 }
             } catch {
@@ -540,19 +562,33 @@ final class StatusController: NSObject, NSMenuDelegate {
             updateSummary("\(running.count) active build(s)")
         } else if !hasLoadedOverview || !hasLoadedLatestBuilds {
             updateSummary("Refreshing…")
-        } else if let preferredSession = sessions.first(where: { $0.workerName != nil }),
-                  let workerName = preferredSession.workerName,
-                  let selectedProject = projects.first(where: { $0.accountID == preferredSession.accountID && $0.kind == .worker && $0.name == workerName }),
-                  let buildID = selectedProject.buildID,
-                  let latest = latestBuildsByID[buildID] {
-            let status = latest.status ?? "unknown"
-            let branch = latest.branch ?? "-"
-            updateSummary("Latest: \(status) (\(branch))")
         } else if projects.isEmpty {
             updateSummary("No projects found")
+        } else if let lastRefreshedAt {
+            updateSummary("Refreshed \(relativeRefreshString(since: lastRefreshedAt))")
         } else {
-            updateSummary("Monitoring \(projects.count) project(s)")
+            updateSummary("Refreshed just now")
         }
+    }
+
+    private func relativeRefreshString(since date: Date) -> String {
+        let seconds = max(0, Int(Date().timeIntervalSince(date)))
+        if seconds < 5 {
+            return "just now"
+        }
+        if seconds < 60 {
+            return "\(seconds)s ago"
+        }
+        let minutes = seconds / 60
+        if minutes < 60 {
+            return "\(minutes)m ago"
+        }
+        let hours = minutes / 60
+        if hours < 24 {
+            return "\(hours)h ago"
+        }
+        let days = hours / 24
+        return "\(days)d ago"
     }
 
     private func rebuildWorkersPagesMenu() {
