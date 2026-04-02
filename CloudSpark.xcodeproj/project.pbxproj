@@ -6,8 +6,13 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		0F68AA4970B01E3514FF3278 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F3FD894AADDE25170CA213CD /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		12455EACF6B12AA0A7CD0819 /* CloudSpark.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CloudSpark.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F3FD894AADDE25170CA213CD /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -23,6 +28,14 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXGroup section */
+		5DC3D7C379C861742B18F399 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				F3FD894AADDE25170CA213CD /* Assets.xcassets */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
 		6A394CAD7A7E05D31636A000 /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -35,6 +48,7 @@
 			isa = PBXGroup;
 			children = (
 				F73BB10685A55630E8E63B32 /* Sources */,
+				5DC3D7C379C861742B18F399 /* Sources */,
 				6A394CAD7A7E05D31636A000 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -47,6 +61,7 @@
 			buildConfigurationList = B1BFA78808D2D32EDC2285EE /* Build configuration list for PBXNativeTarget "CloudSpark" */;
 			buildPhases = (
 				2EBF745EC8BA0E80CC92E6CC /* Sources */,
+				83E730A6E2A1D870EDE98750 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -95,6 +110,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		83E730A6E2A1D870EDE98750 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0F68AA4970B01E3514FF3278 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		2EBF745EC8BA0E80CC92E6CC /* Sources */ = {

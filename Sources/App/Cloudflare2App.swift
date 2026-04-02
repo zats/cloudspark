@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusController: StatusController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        BuildNotificationManager.configure()
         statusController = StatusController()
         statusController?.start()
     }

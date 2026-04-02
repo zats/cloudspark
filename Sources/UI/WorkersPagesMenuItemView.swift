@@ -143,7 +143,7 @@ final class WorkersPagesMenuItemView: NSView {
     private func statusImage(for status: String?) -> NSImage? {
         let symbolName = switch status?.lowercased() {
         case "queued", "initializing", "running", "building", "deploying":
-            "clock.fill"
+            "arrow.trianglehead.2.clockwise.rotate.90"
         case "success":
             "checkmark.circle.fill"
         case "failure", "failed", "error":

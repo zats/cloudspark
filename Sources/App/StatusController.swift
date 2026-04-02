@@ -633,14 +633,15 @@ final class StatusController: NSObject, NSMenuDelegate {
             }
 
             let projectName = overviewProjectsByID.values.first(where: { $0.buildID == externalScriptID })?.name ?? "Worker"
-            let branch = build.branch ?? "main"
+            let status = displayStatus(for: build)
+            let body = build.branch.map { "\(status) • \($0)" } ?? status
 
             if build.isInProgress {
-                BuildNotificationManager.notify(title: "\(projectName) build started", body: branch)
+                BuildNotificationManager.notify(title: projectName, body: body)
             } else if build.isSuccessful {
-                BuildNotificationManager.notify(title: "\(projectName) deployed", body: branch)
+                BuildNotificationManager.notify(title: projectName, body: body)
             } else if build.isFailed {
-                BuildNotificationManager.notify(title: "\(projectName) build failed", body: branch)
+                BuildNotificationManager.notify(title: projectName, body: body)
             }
         }
     }

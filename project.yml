@@ -28,6 +28,10 @@ targets:
     sources:
       - path: Sources
         type: syncedFolder
+        excludes:
+          - Assets.xcassets
+      - path: Sources/Assets.xcassets
+        buildPhase: resources
     settings:
       base:
         INFOPLIST_FILE: Support/cloudflare2/Info.plist
