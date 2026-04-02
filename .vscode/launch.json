@@ -1,0 +1,64 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:cloudflare}",
+            "name": "Debug cloudflare",
+            "target": "cloudflare",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug cloudflare"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:cloudflare}",
+            "name": "Release cloudflare",
+            "target": "cloudflare",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release cloudflare"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:cloudflare}",
+            "name": "Debug cloudflare2",
+            "target": "cloudflare2",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug cloudflare2"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:cloudflare}",
+            "name": "Release cloudflare2",
+            "target": "cloudflare2",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release cloudflare2"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:cloudflare}",
+            "name": "Debug cloudflare2ctl",
+            "target": "cloudflare2ctl",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug cloudflare2ctl"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:cloudflare}",
+            "name": "Release cloudflare2ctl",
+            "target": "cloudflare2ctl",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release cloudflare2ctl"
+        }
+    ]
+}
