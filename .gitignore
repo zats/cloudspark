@@ -2,3 +2,5 @@
 .build/
 .playwright-mcp/
 .swiftpm/
+.env.local
+Cloudflare2.xcodeproj/

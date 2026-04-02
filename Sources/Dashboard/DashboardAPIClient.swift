@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 final class DashboardAPIClient {
     private let session: DashboardSession
@@ -8,6 +9,55 @@ final class DashboardAPIClient {
     init(session: DashboardSession, client: URLSession = .shared) {
         self.session = session
         self.client = client
+    }
+
+    func fetchCurrentUserProfile() async throws -> DashboardUserProfile {
+        let data = try await send(path: "/user", queryItems: [])
+        let object = try parseJSON(data)
+        guard let result = object["result"] as? [String: Any] else {
+            throw DashboardError.invalidResponse
+        }
+
+        let email = result["email"] as? String
+        let username = (result["username"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let firstName = (result["first_name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lastName = (result["last_name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nameComponents = ([firstName, lastName] as [String?]).compactMap { value -> String? in
+            guard let value, !value.isEmpty else { return nil }
+            return value
+        }
+        let displayName = nameComponents.isEmpty ? username : nameComponents.joined(separator: " ")
+        let directAvatarURL = (result["avatar_url"] as? String)
+            ?? (result["profile_image_url"] as? String)
+            ?? (result["avatar"] as? String)
+            ?? (result["image_url"] as? String)
+
+        return DashboardUserProfile(
+            email: email,
+            displayName: displayName,
+            avatarURL: directAvatarURL ?? email.flatMap(makeAvatarURL(email:))
+        )
+    }
+
+    func resolveSessionContext() async throws -> DashboardSessionContext {
+        let persistenceData = try await send(path: "/persistence/user", queryItems: [])
+        guard let persistence = try JSONSerialization.jsonObject(with: persistenceData) as? [String: Any] else {
+            throw DashboardError.invalidResponse
+        }
+
+        let recentsByAccount = (persistence["recents"] as? [String: Any] ?? [:]).reduce(into: [String: [[String: Any]]]()) {
+            guard let items = $1.value as? [[String: Any]] else {
+                return
+            }
+            $0[$1.key] = items
+        }
+
+        let accountID = try resolveAccountID(from: recentsByAccount)
+        let workerName = recentsByAccount[accountID]?
+            .filter { ($0["type"] as? String) == "worker" }
+            .max { lastTimestamp(in: $0) < lastTimestamp(in: $1) }?["zone"] as? String
+
+        return DashboardSessionContext(accountID: accountID, workerName: workerName)
     }
 
     func listOverviewProjects(accountID: String) async throws -> [DashboardProject] {
@@ -36,6 +86,7 @@ final class DashboardAPIClient {
                 let environment = service["default_environment"] as? [String: Any]
                 let script = environment?["script"] as? [String: Any]
                 return DashboardProject(
+                    accountID: accountID,
                     kind: .worker,
                     name: name,
                     subtitle: nil,
@@ -57,6 +108,7 @@ final class DashboardAPIClient {
                     return nil
                 }
                 return DashboardProject(
+                    accountID: accountID,
                     kind: .page,
                     name: name,
                     subtitle: project["subdomain"] as? String,
@@ -87,6 +139,7 @@ final class DashboardAPIClient {
                 return nil
             }
             return DashboardProject(
+                accountID: accountID,
                 kind: .worker,
                 name: name,
                 subtitle: nil,
@@ -118,6 +171,7 @@ final class DashboardAPIClient {
             let trigger = latestDeployment?["deployment_trigger"] as? [String: Any]
             let metadata = trigger?["metadata"] as? [String: Any]
             return DashboardProject(
+                accountID: accountID,
                 kind: .page,
                 name: name,
                 subtitle: item["subdomain"] as? String,
@@ -402,6 +456,48 @@ final class DashboardAPIClient {
             return nil
         }
         return DashboardDateParser.parse(value)
+    }
+
+    private func makeAvatarURL(email: String) -> String? {
+        let normalized = email
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !normalized.isEmpty else {
+            return nil
+        }
+        let digest = Insecure.MD5.hash(data: Data(normalized.utf8))
+        let hash = digest.map { String(format: "%02x", $0) }.joined()
+        return "https://www.gravatar.com/avatar/\(hash)?s=128&d=identicon"
+    }
+
+    private func resolveAccountID(from recentsByAccount: [String: [[String: Any]]]) throws -> String {
+        if let accountID = recentsByAccount
+            .compactMap({ accountID, items -> (String, Date)? in
+                items
+                    .filter { (($0["url"] as? String) ?? "").contains("/workers-and-pages") }
+                    .compactMap { parseDate($0["timestamp"] as? String) }
+                    .max()
+                    .map { (accountID, $0) }
+            })
+            .max(by: { $0.1 < $1.1 })?.0
+        {
+            return accountID
+        }
+
+        if let accountID = recentsByAccount
+            .compactMap({ accountID, items in
+                items.map { (accountID, lastTimestamp(in: $0)) }.max(by: { $0.1 < $1.1 })
+            })
+            .max(by: { $0.1 < $1.1 })?.0
+        {
+            return accountID
+        }
+
+        throw DashboardError.missingAccountContext
+    }
+
+    private func lastTimestamp(in item: [String: Any]) -> Date {
+        parseDate(item["timestamp"] as? String) ?? .distantPast
     }
 
     private func makePlainDateFormatter() -> ISO8601DateFormatter {

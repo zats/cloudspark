@@ -2,7 +2,7 @@ import AppKit
 
 @MainActor
 @main
-enum Cloudflare2App {
+enum CloudSparkApp {
     private static let appDelegate = AppDelegate()
 
     static func main() {

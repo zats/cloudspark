@@ -13,10 +13,12 @@ final class WorkersPagesMenuItemView: NSView {
     private let cpuItem = MetricItemView(symbolName: "cpu")
     private let releaseItem = MetricItemView(symbolName: "clock")
     private var project: DashboardProject
+    private let rowWidth: CGFloat = 360
+    private let rowHeight: CGFloat = 64
 
     init(project: DashboardProject) {
         self.project = project
-        super.init(frame: NSRect(x: 0, y: 0, width: 320, height: 58))
+        super.init(frame: NSRect(x: 0, y: 0, width: rowWidth, height: rowHeight))
         translatesAutoresizingMaskIntoConstraints = false
         setup()
         update(project: project)
@@ -97,8 +99,8 @@ final class WorkersPagesMenuItemView: NSView {
         addSubview(statusIconView)
 
         NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: 320),
-            heightAnchor.constraint(equalToConstant: 58),
+            widthAnchor.constraint(equalToConstant: rowWidth),
+            heightAnchor.constraint(equalToConstant: rowHeight),
 
             backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
             backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
@@ -118,7 +120,7 @@ final class WorkersPagesMenuItemView: NSView {
             labels.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 10),
             labels.trailingAnchor.constraint(lessThanOrEqualTo: statusIconView.leadingAnchor, constant: -10),
             labels.topAnchor.constraint(equalTo: topAnchor, constant: 8),
-            labels.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -8),
+            labels.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -10),
         ])
     }
 

@@ -6,21 +6,38 @@ import WebKit
 final class DashboardAuthenticator: NSObject {
     private var completion: ((Result<DashboardSession, Error>) -> Void)?
     private var window: NSWindow?
+    private weak var parentWindow: NSWindow?
     private var webView: WKWebView?
-    private var loadingOverlay: NSVisualEffectView?
+    private var loadingAccessoryView: NSView?
     private var loadingIndicator: NSProgressIndicator?
     private var xAtok: String?
     private var hasBootstrapUser = false
     private var cookies: [HTTPCookie] = []
     private var pollTimer: Timer?
     private var isFinishing = false
+    private var isCompletingSession = false
+    private var userEmail: String?
+    private var userDisplayName: String?
+    private var userAvatarURL: String?
 
-    func present(accountID: String, completion: @escaping (Result<DashboardSession, Error>) -> Void) {
+    func present(parentWindow: NSWindow? = nil, completion: @escaping (Result<DashboardSession, Error>) -> Void) {
+        if let window {
+            self.completion = completion
+            if let parentWindow, window.sheetParent !== parentWindow {
+                window.orderOut(nil)
+                parentWindow.beginSheet(window)
+            } else {
+                window.makeKeyAndOrderFront(nil)
+            }
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            return
+        }
         self.completion = completion
-        showLoginWindow(accountID: accountID)
+        self.parentWindow = parentWindow
+        showLoginWindow()
     }
 
-    private func showLoginWindow(accountID: String) {
+    private func showLoginWindow() {
         let userContentController = WKUserContentController()
 
         let configuration = WKWebViewConfiguration()
@@ -50,18 +67,20 @@ final class DashboardAuthenticator: NSObject {
         container.autoresizingMask = [.width, .height]
         webView.frame = container.bounds
         container.addSubview(webView)
-        let loadingOverlay = makeLoadingOverlay()
-        container.addSubview(loadingOverlay)
-        NSLayoutConstraint.activate([
-            loadingOverlay.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
-            loadingOverlay.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-            loadingOverlay.widthAnchor.constraint(equalToConstant: 120),
-            loadingOverlay.heightAnchor.constraint(equalToConstant: 36),
-        ])
-        self.loadingOverlay = loadingOverlay
+        let loadingAccessoryView = makeLoadingAccessoryView()
+        self.loadingAccessoryView = loadingAccessoryView
         window.contentView = container
-        window.center()
-        window.makeKeyAndOrderFront(nil)
+        let accessory = NSTitlebarAccessoryViewController()
+        accessory.layoutAttribute = .right
+        accessory.view = loadingAccessoryView
+        loadingAccessoryView.frame = NSRect(x: 0, y: 0, width: 24, height: 24)
+        window.addTitlebarAccessoryViewController(accessory)
+        if let parentWindow {
+            parentWindow.beginSheet(window)
+        } else {
+            window.center()
+            window.makeKeyAndOrderFront(nil)
+        }
         NSApplication.shared.activate(ignoringOtherApps: true)
         self.window = window
 
@@ -74,33 +93,28 @@ final class DashboardAuthenticator: NSObject {
         startPolling()
     }
 
-    private func makeLoadingOverlay() -> NSVisualEffectView {
-        let overlay = NSVisualEffectView(frame: .zero)
-        overlay.translatesAutoresizingMaskIntoConstraints = false
-        overlay.blendingMode = .withinWindow
-        overlay.material = .menu
-        overlay.state = .active
-        overlay.wantsLayer = true
-        overlay.layer?.cornerRadius = 4
+    private func makeLoadingAccessoryView() -> NSView {
+        let container = NSView(frame: .zero)
+        container.translatesAutoresizingMaskIntoConstraints = false
 
         let indicator = NSProgressIndicator(frame: .zero)
         indicator.style = .spinning
         indicator.controlSize = .small
         indicator.translatesAutoresizingMaskIntoConstraints = false
         indicator.startAnimation(nil)
-        overlay.addSubview(indicator)
+        container.addSubview(indicator)
         self.loadingIndicator = indicator
 
         NSLayoutConstraint.activate([
-            indicator.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
-            indicator.centerYAnchor.constraint(equalTo: overlay.centerYAnchor),
+            indicator.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            indicator.centerYAnchor.constraint(equalTo: container.centerYAnchor),
         ])
 
-        return overlay
+        return container
     }
 
     private func setLoading(_ isLoading: Bool) {
-        loadingOverlay?.isHidden = !isLoading
+        loadingAccessoryView?.isHidden = !isLoading
         if isLoading {
             loadingIndicator?.startAnimation(nil)
         } else {
@@ -127,7 +141,23 @@ final class DashboardAuthenticator: NSObject {
             return {
               atok: typeof parsed?.atok === "string" ? parsed.atok : null,
               securityToken: typeof parsed?.data?.security_token === "string" ? parsed.data.security_token : null,
-              userID: typeof parsed?.data?.user?.id === "string" ? parsed.data.user.id : null
+              userID: typeof parsed?.data?.user?.id === "string" ? parsed.data.user.id : null,
+              email: typeof parsed?.data?.user?.email === "string" ? parsed.data.user.email : null,
+              username: typeof parsed?.data?.user?.username === "string" ? parsed.data.user.username : null,
+              avatarURL:
+                typeof parsed?.data?.user?.avatar_url === "string" ? parsed.data.user.avatar_url :
+                typeof parsed?.data?.user?.profile_image_url === "string" ? parsed.data.user.profile_image_url :
+                typeof parsed?.data?.user?.avatar === "string" ? parsed.data.user.avatar :
+                typeof parsed?.data?.user?.image_url === "string" ? parsed.data.user.image_url :
+                null,
+              displayName:
+                typeof parsed?.data?.user?.full_name === "string" ? parsed.data.user.full_name :
+                typeof parsed?.data?.user?.display_name === "string" ? parsed.data.user.display_name :
+                typeof parsed?.data?.user?.name === "string" ? parsed.data.user.name :
+                typeof parsed?.data?.user?.username === "string" ? parsed.data.user.username :
+                [parsed?.data?.user?.first_name, parsed?.data?.user?.last_name]
+                  .filter(value => typeof value === "string" && value.trim().length > 0)
+                  .join(" ") || null
             };
           } catch (_) {
             return null;
@@ -143,6 +173,9 @@ final class DashboardAuthenticator: NSObject {
                     }
                     let userID = payload["userID"] as? String
                     let securityToken = payload["securityToken"] as? String
+                    self?.userEmail = payload["email"] as? String
+                    self?.userDisplayName = payload["displayName"] as? String
+                    self?.userAvatarURL = payload["avatarURL"] as? String
                     self?.hasBootstrapUser = !(userID?.isEmpty ?? true) && !(securityToken?.isEmpty ?? true)
                 }
                 self?.finishIfReady()
@@ -151,6 +184,9 @@ final class DashboardAuthenticator: NSObject {
     }
 
     private func finishIfReady() {
+        guard !isFinishing, !isCompletingSession else {
+            return
+        }
         guard let xAtok, !xAtok.isEmpty else {
             return
         }
@@ -170,14 +206,38 @@ final class DashboardAuthenticator: NSObject {
         let session = DashboardSession(
             capturedAt: Date(),
             xAtok: xAtok,
-            cookies: cookies.map(DashboardCookie.init(cookie:))
+            cookies: cookies.map(DashboardCookie.init(cookie:)),
+            accountID: nil,
+            workerName: nil,
+            userEmail: userEmail,
+            userDisplayName: userDisplayName,
+            userAvatarURL: userAvatarURL
         )
 
-        do {
-            try DashboardSessionStore.save(session)
-            finish(.success(session))
-        } catch {
-            finish(.failure(error))
+        isCompletingSession = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let client = DashboardAPIClient(session: session)
+                let context = try await client.resolveSessionContext()
+                let profile = try? await client.fetchCurrentUserProfile()
+                let hydratedSession = DashboardSession(
+                    capturedAt: session.capturedAt,
+                    xAtok: session.xAtok,
+                    cookies: session.cookies,
+                    accountID: context.accountID,
+                    workerName: context.workerName,
+                    userEmail: profile?.email ?? session.userEmail,
+                    userDisplayName: profile?.displayName ?? session.userDisplayName,
+                    userAvatarURL: profile?.avatarURL ?? session.userAvatarURL
+                )
+                try DashboardSessionStore.save(hydratedSession)
+                self.isCompletingSession = false
+                finish(.success(hydratedSession))
+            } catch {
+                self.isCompletingSession = false
+                finish(.failure(error))
+            }
         }
     }
 
@@ -192,18 +252,28 @@ final class DashboardAuthenticator: NSObject {
         completion = nil
         let webView = webView
         let window = window
+        let parentWindow = parentWindow
 
         webView?.navigationDelegate = nil
         window?.delegate = nil
         window?.contentView = NSView(frame: .zero)
-        window?.orderOut(nil)
+        if let window, let parentWindow {
+            parentWindow.endSheet(window)
+        } else {
+            window?.orderOut(nil)
+        }
         self.window = nil
+        self.parentWindow = nil
         self.webView = nil
-        loadingOverlay = nil
+        loadingAccessoryView = nil
         loadingIndicator = nil
         xAtok = nil
         hasBootstrapUser = false
         cookies = []
+        userEmail = nil
+        userDisplayName = nil
+        userAvatarURL = nil
+        isCompletingSession = false
         callback?(result)
         DispatchQueue.main.async {
             _ = webView
@@ -253,9 +323,11 @@ extension DashboardAuthenticator: WKNavigationDelegate {
 }
 
 extension DashboardAuthenticator: NSWindowDelegate {
-    func windowWillClose(_ notification: Notification) {
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
         if completion != nil {
             finish(.failure(DashboardError.userCancelledLogin))
+            return false
         }
+        return true
     }
 }

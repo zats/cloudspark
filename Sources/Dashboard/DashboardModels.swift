@@ -4,6 +4,29 @@ struct DashboardSession: Codable {
     let capturedAt: Date
     let xAtok: String
     let cookies: [DashboardCookie]
+    let accountID: String?
+    let workerName: String?
+    let userEmail: String?
+    let userDisplayName: String?
+    let userAvatarURL: String?
+
+    var storageKey: String {
+        if let accountID, !accountID.isEmpty {
+            return accountID
+        }
+        return xAtok
+    }
+}
+
+struct DashboardSessionContext {
+    let accountID: String
+    let workerName: String?
+}
+
+struct DashboardUserProfile {
+    let email: String?
+    let displayName: String?
+    let avatarURL: String?
 }
 
 struct DashboardCookie: Codable {
@@ -55,6 +78,26 @@ struct DashboardBuild: Encodable {
         guard let status else { return false }
         return ["queued", "initializing", "running"].contains(status.lowercased())
     }
+
+    var isSuccessful: Bool {
+        if let outcome = buildOutcome?.lowercased(), ["success", "successful", "succeeded"].contains(outcome) {
+            return true
+        }
+        if let status = status?.lowercased(), ["success", "successful", "succeeded", "deployed", "complete", "completed"].contains(status) {
+            return true
+        }
+        return false
+    }
+
+    var isFailed: Bool {
+        if let outcome = buildOutcome?.lowercased(), ["failed", "failure", "errored", "error", "canceled", "cancelled"].contains(outcome) {
+            return true
+        }
+        if let status = status?.lowercased(), ["failed", "failure", "errored", "error", "canceled", "cancelled"].contains(status) {
+            return true
+        }
+        return false
+    }
 }
 
 struct DashboardProjectMetrics {
@@ -75,6 +118,7 @@ enum DashboardProjectKind {
 }
 
 struct DashboardProject {
+    let accountID: String
     let kind: DashboardProjectKind
     let name: String
     let subtitle: String?
@@ -86,5 +130,13 @@ struct DashboardProject {
 
     var statusText: String? {
         latestStatus
+    }
+
+    var id: String {
+        "\(accountID):\(kind == .worker ? "worker" : "page"):\(name)"
+    }
+
+    var buildID: String? {
+        externalScriptID.map { "\(accountID):\($0)" }
     }
 }
