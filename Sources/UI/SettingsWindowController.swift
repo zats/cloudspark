@@ -8,10 +8,13 @@ final class SettingsWindowController: NSWindowController {
     }
 
     private let tabsController = SettingsTabsViewController()
+    private let settingsFrameWidth: CGFloat = 400
+    private let generalContentHeight: CGFloat = 220
+    private let accountsContentHeight: CGFloat = 270
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 360),
+            contentRect: NSRect(x: 0, y: 0, width: 300, height: generalContentHeight),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -20,6 +23,14 @@ final class SettingsWindowController: NSWindowController {
         window.toolbarStyle = .preference
         super.init(window: window)
         window.contentViewController = tabsController
+        var frame = window.frame
+        frame.size.width = settingsFrameWidth
+        window.setFrame(frame, display: false)
+        window.minSize = NSSize(width: settingsFrameWidth, height: generalContentHeight)
+        window.maxSize = NSSize(width: settingsFrameWidth, height: .greatestFiniteMagnitude)
+        tabsController.onSelectTab = { [weak self] tab in
+            self?.resize(for: tab, animated: true)
+        }
     }
 
     @available(*, unavailable)
@@ -47,7 +58,8 @@ final class SettingsWindowController: NSWindowController {
         tabsController.onSetLaunchAtLogin = onSetLaunchAtLogin
         tabsController.onSetNotificationsEnabled = onSetNotificationsEnabled
         tabsController.onSetRefreshInterval = onSetRefreshInterval
-        tabsController.select(tab: selectedTab)
+        tabsController.select(tab: selectedTab, notify: false)
+        resize(for: selectedTab, animated: false)
         NSApplication.shared.activate(ignoringOtherApps: true)
         showWindow(nil)
         window?.center()
@@ -67,12 +79,28 @@ final class SettingsWindowController: NSWindowController {
     var hostWindow: NSWindow? {
         window
     }
+
+    private func resize(for tab: Tab, animated: Bool) {
+        guard let window else { return }
+        let targetContentHeight = switch tab {
+        case .general: generalContentHeight
+        case .accounts: accountsContentHeight
+        }
+        let contentWidth = window.contentRect(forFrameRect: window.frame).width
+        let targetFrameHeight = window.frameRect(forContentRect: NSRect(x: 0, y: 0, width: contentWidth, height: targetContentHeight)).height
+        var frame = window.frame
+        frame.origin.y += frame.height - targetFrameHeight
+        frame.size.width = settingsFrameWidth
+        frame.size.height = targetFrameHeight
+        window.setFrame(frame, display: true, animate: animated)
+    }
 }
 
 @MainActor
 private final class SettingsTabsViewController: NSTabViewController {
     let generalViewController = GeneralSettingsViewController()
     let accountsViewController = AccountsSettingsViewController()
+    var onSelectTab: ((SettingsWindowController.Tab) -> Void)?
 
     var onLogin: (() -> Void)? {
         didSet { accountsViewController.onLogin = onLogin }
@@ -120,11 +148,18 @@ private final class SettingsTabsViewController: NSTabViewController {
         accountsViewController.update(sessions: sessions)
     }
 
-    func select(tab: SettingsWindowController.Tab) {
+    func select(tab: SettingsWindowController.Tab, notify: Bool = true) {
         selectedTabViewItemIndex = switch tab {
         case .general: 0
         case .accounts: 1
         }
+        if notify {
+            onSelectTab?(tab)
+        }
+    }
+
+    override func tabView(_ tabView: NSTabView, didSelect tabViewItem: NSTabViewItem?) {
+        onSelectTab?(selectedTabViewItemIndex == 0 ? .general : .accounts)
     }
 }
 
@@ -216,7 +251,9 @@ private final class GeneralSettingsViewController: NSViewController {
 
 @MainActor
 private final class AccountsSettingsViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
+    private let tableContainer = NSView()
     private let scrollView = NSScrollView()
+    private let controlsDivider = NSView()
     private let tableView = AccountsTableView()
     private let controls = NSSegmentedControl(labels: ["", ""], trackingMode: .momentary, target: nil, action: nil)
     private var sessions: [DashboardSession] = []
@@ -245,40 +282,69 @@ private final class AccountsSettingsViewController: NSViewController, NSTableVie
         column.resizingMask = .autoresizingMask
         tableView.addTableColumn(column)
         tableView.headerView = nil
-        tableView.rowHeight = 52
+        tableView.style = .inset
+        tableView.rowHeight = 68
+        tableView.rowSizeStyle = .custom
         tableView.intercellSpacing = .zero
         tableView.delegate = self
         tableView.dataSource = self
         tableView.usesAlternatingRowBackgroundColors = false
         tableView.focusRingType = .none
+        tableView.backgroundColor = .clear
         tableView.menuProvider = { [weak self] row in
             self?.makeContextMenu(for: row)
         }
 
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
-        controls.segmentStyle = .smallSquare
-        controls.setWidth(26, forSegment: 0)
-        controls.setWidth(26, forSegment: 1)
+        tableContainer.wantsLayer = true
+        tableContainer.layer?.cornerRadius = 14
+        tableContainer.layer?.borderWidth = 1
+        tableContainer.layer?.borderColor = NSColor.separatorColor.cgColor
+        tableContainer.translatesAutoresizingMaskIntoConstraints = false
+
+        controlsDivider.wantsLayer = true
+        controlsDivider.layer?.backgroundColor = NSColor.separatorColor.cgColor
+        controlsDivider.translatesAutoresizingMaskIntoConstraints = false
+
+        controls.segmentStyle = .separated
+        controls.setWidth(28, forSegment: 0)
+        controls.setWidth(28, forSegment: 1)
         controls.setImage(NSImage(systemSymbolName: "plus", accessibilityDescription: nil), forSegment: 0)
         controls.setImage(NSImage(systemSymbolName: "minus", accessibilityDescription: nil), forSegment: 1)
+        controls.setImageScaling(.scaleProportionallyDown, forSegment: 0)
+        controls.setImageScaling(.scaleProportionallyDown, forSegment: 1)
         controls.target = self
         controls.action = #selector(handleControls)
         controls.translatesAutoresizingMaskIntoConstraints = false
 
-        view.addSubview(scrollView)
-        view.addSubview(controls)
+        view.addSubview(tableContainer)
+        tableContainer.addSubview(scrollView)
+        tableContainer.addSubview(controlsDivider)
+        tableContainer.addSubview(controls)
 
         NSLayoutConstraint.activate([
-            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
-            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
-            scrollView.topAnchor.constraint(equalTo: view.topAnchor, constant: 24),
-            scrollView.heightAnchor.constraint(equalToConstant: 180),
+            tableContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+            tableContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
+            tableContainer.topAnchor.constraint(equalTo: view.topAnchor, constant: 24),
+            tableContainer.heightAnchor.constraint(equalToConstant: 220),
 
-            controls.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
-            controls.topAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: 8),
+            scrollView.leadingAnchor.constraint(equalTo: tableContainer.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: tableContainer.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: tableContainer.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: controlsDivider.topAnchor),
+
+            controlsDivider.leadingAnchor.constraint(equalTo: tableContainer.leadingAnchor),
+            controlsDivider.trailingAnchor.constraint(equalTo: tableContainer.trailingAnchor),
+            controlsDivider.bottomAnchor.constraint(equalTo: controls.topAnchor, constant: -8),
+            controlsDivider.heightAnchor.constraint(equalToConstant: 1),
+
+            controls.leadingAnchor.constraint(equalTo: tableContainer.leadingAnchor, constant: 10),
+            controls.bottomAnchor.constraint(equalTo: tableContainer.bottomAnchor, constant: -8),
         ])
     }
 
@@ -422,13 +488,13 @@ private final class AccountCellView: NSTableCellView {
         addSubview(labels)
 
         NSLayoutConstraint.activate([
-            avatarView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            avatarView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
             avatarView.centerYAnchor.constraint(equalTo: centerYAnchor),
             avatarView.widthAnchor.constraint(equalToConstant: 36),
             avatarView.heightAnchor.constraint(equalToConstant: 36),
 
-            labels.leadingAnchor.constraint(equalTo: avatarView.trailingAnchor, constant: 12),
-            labels.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            labels.leadingAnchor.constraint(equalTo: avatarView.trailingAnchor, constant: 8),
+            labels.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
             labels.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
     }
