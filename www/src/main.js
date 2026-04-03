@@ -112,8 +112,6 @@ const downloadLink = document.querySelector("#download-link");
 if (downloadLink) {
   downloadLink.href = DOWNLOAD_URL;
 }
-const themeColorMeta = document.querySelector('meta[name="theme-color"]');
-let themeColorValue = themeColorMeta?.content ?? "";
 const wordmark = document.querySelector("h1");
 const wordmarkText = wordmark.textContent.trim();
 const wordmarkCanvas = document.createElement("canvas");
@@ -137,30 +135,6 @@ function mixScalar(a, b, t) {
 
 function mixColor(a, b, t) {
   return a.map((channel, index) => mixScalar(channel, b[index], t));
-}
-
-function colorToHex(color) {
-  return `#${color
-    .map((channel) => Math.round(channel).toString(16).padStart(2, "0"))
-    .join("")}`;
-}
-
-function updateThemeColor(baseSunUv) {
-  if (!themeColorMeta) {
-    return;
-  }
-
-  const dayAmount = smoothstepJs(0.14, 0.46, baseSunUv.y);
-  const nightAmount = 1 - smoothstepJs(-0.08, 0.1, baseSunUv.y);
-  const sunsetAmount = clamp01(1 - dayAmount - nightAmount * 0.55);
-  let themeColor = mixColor([8, 13, 26], [117, 176, 245], dayAmount);
-  themeColor = mixColor(themeColor, [250, 245, 237], sunsetAmount);
-  const nextValue = colorToHex(themeColor);
-
-  if (nextValue !== themeColorValue) {
-    themeColorMeta.content = nextValue;
-    themeColorValue = nextValue;
-  }
 }
 
 const canvas = document.querySelector(".hero-canvas");
@@ -761,7 +735,6 @@ currentSun.copy(currentBaseSun);
 wordmarkMaterial.uniforms.uPointer.value.copy(currentPointer);
 wordmarkMaterial.uniforms.uSunBaseUv.value.copy(currentBaseSun);
 wordmarkMaterial.uniforms.uSunUv.value.copy(currentSun);
-updateThemeColor(currentBaseSun);
 renderWordmark();
 
 window.addEventListener("pointermove", (event) => {
@@ -815,7 +788,6 @@ function render() {
   wordmarkMaterial.uniforms.uPointer.value.copy(currentPointer);
   wordmarkMaterial.uniforms.uSunBaseUv.value.copy(currentBaseSun);
   wordmarkMaterial.uniforms.uSunUv.value.copy(currentSun);
-  updateThemeColor(currentBaseSun);
   renderer.render(scene, camera);
   renderWordmark();
   window.requestAnimationFrame(render);

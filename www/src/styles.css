@@ -23,9 +23,6 @@ body {
   min-height: 100svh;
   min-height: 100lvh;
   overflow: hidden;
-  background:
-    radial-gradient(circle at 68% 72%, rgba(255, 177, 94, 0.28), transparent 22%),
-    linear-gradient(180deg, #fffdf9 0%, #ffeed2 48%, #ffb86b 100%);
   isolation: isolate;
 }
 
