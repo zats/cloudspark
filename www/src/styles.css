@@ -64,30 +64,23 @@ body {
   justify-items: center;
   text-align: center;
   color: #ffffff;
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.16);
-}
-
-.eyebrow,
-.copy {
-  margin: 0;
-  margin-bottom: 40px;;
-}
-
-.eyebrow {
-  font-size: 0.78rem;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.86);
+  /* text-shadow: 0 1px 4px rgba(0, 0, 0, 0.16); */
 }
 
 h1 {
+  position: relative;
+  display: inline-block;
+  --wordmark-bleed: 18px;
   margin: 0;
   margin-bottom: 40px;
   max-width: 9ch;
   font-size: clamp(3.5rem, 10vw, 7.5rem);
   line-height: 0.9;
-  letter-spacing: -0.06em;
+  letter-spacing: inherit;
   font-weight: 500;
+  color: transparent;
+  /* text-shadow: none; */
+  -webkit-text-fill-color: transparent;
 }
 
 .copy {
@@ -97,20 +90,42 @@ h1 {
   color: rgba(255, 255, 255, 0.92);
 }
 
+.wordmark-canvas {
+  position: absolute;
+  inset: calc(-1 * var(--wordmark-bleed));
+  width: calc(100% + var(--wordmark-bleed) * 2);
+  height: calc(100% + var(--wordmark-bleed) * 2);
+  display: block;
+  pointer-events: none;
+  /* filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.16)); */
+}
+
 .cta {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 0.42rem;
   min-width: 12rem;
   height: 2.9rem;
-  padding: 0 1.15rem;
+  padding: 0 1rem;
   border-radius: 4px;
   background: #111111;
   color: #ffffff;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
   text-decoration: none;
   font-size: 0.98rem;
+  line-height: 1;
   letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.cta-icon {
+  width: 1.05rem;
+  height: 1.05rem;
+  display: block;
+  flex: 0 0 auto;
+  fill: currentColor;
+  overflow: visible;
 }
 
 .cta:hover {

@@ -122,6 +122,13 @@ const downloadLink = document.querySelector("#download-link");
 if (downloadLink) {
   downloadLink.href = resolveDownloadUrl();
 }
+const wordmark = document.querySelector("h1");
+const wordmarkText = wordmark.textContent.trim();
+const wordmarkCanvas = document.createElement("canvas");
+wordmarkCanvas.className = "wordmark-canvas";
+wordmarkCanvas.setAttribute("aria-hidden", "true");
+wordmark.append(wordmarkCanvas);
+const wordmarkContext = wordmarkCanvas.getContext("2d");
 
 const canvas = document.querySelector(".hero-canvas");
 const renderer = new THREE.WebGLRenderer({
@@ -540,16 +547,207 @@ const material = new THREE.ShaderMaterial({
 
 scene.add(new THREE.Mesh(geometry, material));
 
+const wordmarkRenderCanvas = document.createElement("canvas");
+const renderPixelRatio = Math.min(window.devicePixelRatio, 1.5);
+const wordmarkRenderer = new THREE.WebGLRenderer({
+  antialias: true,
+  alpha: true,
+  canvas: wordmarkRenderCanvas,
+  powerPreference: "high-performance",
+});
+wordmarkRenderer.setPixelRatio(renderPixelRatio);
+wordmarkRenderer.setClearAlpha(0);
+
+const wordmarkScene = new THREE.Scene();
+const wordmarkCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const wordmarkMaterial = new THREE.ShaderMaterial({
+  glslVersion: THREE.GLSL3,
+  uniforms: {
+    uTime: { value: 0 },
+    uResolution: { value: new THREE.Vector2(1, 1) },
+    uPointer: { value: new THREE.Vector2(0, 0) },
+    uSunUv: { value: new THREE.Vector2(0.5, 0.5) },
+    uSunBaseUv: { value: new THREE.Vector2(0.5, 0.5) },
+    uShapeNoise: { value: shapeNoise },
+    uViewportOffset: { value: new THREE.Vector2(0, 0) },
+  },
+  vertexShader: `
+    void main() {
+      gl_Position = vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    precision highp float;
+    precision highp sampler3D;
+
+    uniform float uTime;
+    uniform vec2 uResolution;
+    uniform vec2 uPointer;
+    uniform vec2 uSunUv;
+    uniform vec2 uSunBaseUv;
+    uniform vec2 uViewportOffset;
+    uniform sampler3D uShapeNoise;
+
+    out vec4 fragColor;
+
+    vec2 uvToScene(vec2 uv) {
+      return (uv * 2.0 - 1.0) * (uResolution.xy / min(uResolution.x, uResolution.y));
+    }
+
+    float ridge(float x, float center, float width, float height) {
+      x = (x - center) / width;
+      return exp(-x * x) * height;
+    }
+
+    float hash11(float p) {
+      return fract(sin(p * 127.1) * 43758.5453123);
+    }
+
+    float noise1D(float x) {
+      float i = floor(x);
+      float f = fract(x);
+      float u = f * f * (3.0 - 2.0 * f);
+      return mix(hash11(i), hash11(i + 1.0), u);
+    }
+
+    void main() {
+      vec2 screenCoord = gl_FragCoord.xy + uViewportOffset;
+      float minRes = min(uResolution.x, uResolution.y);
+      vec2 p = (screenCoord * 2.0 - uResolution.xy) / minRes;
+      vec2 follow = vec2(uPointer.x * 0.12, uPointer.y * 0.07);
+      float time = uTime * 0.035;
+      vec3 wind = vec3(time, 0.0, time * 0.32);
+      vec2 sunPos = uvToScene(uSunUv);
+      float sx = screenCoord.x / uResolution.x * 2.0 - 1.0;
+      float dayAmount = smoothstep(0.14, 0.46, uSunBaseUv.y);
+      float nightAmount = 1.0 - smoothstep(-0.08, 0.1, uSunBaseUv.y);
+      float sunsetAmount = clamp(1.0 - dayAmount - nightAmount * 0.55, 0.0, 1.0);
+
+      vec3 skyTop = mix(vec3(0.03, 0.05, 0.1), vec3(0.46, 0.69, 0.96), dayAmount);
+      skyTop = mix(skyTop, vec3(0.98, 0.96, 0.93), sunsetAmount);
+      vec3 skyMid = mix(vec3(0.05, 0.08, 0.16), vec3(0.78, 0.88, 0.99), dayAmount);
+      skyMid = mix(skyMid, vec3(0.99, 0.91, 0.78), sunsetAmount);
+      vec3 skyBottom = mix(vec3(0.08, 0.1, 0.18), vec3(0.91, 0.96, 1.0), dayAmount);
+      skyBottom = mix(skyBottom, vec3(0.98, 0.75, 0.48), sunsetAmount);
+      vec3 color = mix(skyTop, skyMid, smoothstep(1.0, -0.05, p.y));
+      color = mix(color, skyBottom, smoothstep(0.08, -1.0, p.y));
+
+      vec3 backdropCoord = vec3(p.x * 0.28 + time * 0.3, p.y * 0.18 + 0.42, 0.17 + time * 0.06);
+      vec4 backdropA = texture(uShapeNoise, fract(backdropCoord + vec3(0.0, 0.0, 0.13)));
+      vec4 backdropB = texture(uShapeNoise, fract(backdropCoord * vec3(1.45, 1.2, 1.45) + vec3(0.37, 0.18, 0.49)));
+      float upperBackdrop = smoothstep(0.46, 0.74, backdropA.r) * smoothstep(0.12, 1.08, p.y);
+      upperBackdrop *= 1.0 - smoothstep(0.86, 1.42, p.y);
+      upperBackdrop *= 0.66 + smoothstep(0.44, 0.8, backdropA.g) * 0.34;
+      float upperBackdropDetail = smoothstep(0.46, 0.74, backdropB.b) * (1.0 - smoothstep(0.54, 0.82, backdropB.a));
+      float highBackdrop = smoothstep(0.48, 0.76, backdropB.r) * smoothstep(0.74, 1.52, p.y) * (1.0 - smoothstep(1.28, 1.86, p.y));
+      vec3 backdropColor = mix(vec3(0.74, 0.79, 0.89), vec3(1.0, 0.88, 0.76), sunsetAmount + dayAmount * 0.22);
+      backdropColor = mix(backdropColor, vec3(0.2, 0.25, 0.36), nightAmount * 0.7);
+      color = mix(color, backdropColor, upperBackdrop * 0.34 + upperBackdropDetail * upperBackdrop * 0.22 + highBackdrop * 0.18);
+      color += mix(vec3(0.14, 0.18, 0.28), vec3(1.0, 0.77, 0.46), sunsetAmount + dayAmount * 0.5) *
+        exp(-1.05 * length((p - sunPos) * vec2(0.72, 1.04))) * mix(0.08, 0.3, 1.0 - nightAmount * 0.6);
+
+      float sunGlow = exp(-1.2 * length(p - sunPos));
+      float sunHalo = exp(-3.8 * length(p - sunPos));
+      float sunCore = exp(-7.2 * length(p - sunPos));
+      color += mix(vec3(0.22, 0.28, 0.4), vec3(1.0, 0.84, 0.46), sunsetAmount + dayAmount * 0.45) * sunGlow * mix(0.04, 0.52, 1.0 - nightAmount);
+      color += mix(vec3(0.12, 0.16, 0.28), vec3(1.0, 0.94, 0.76), sunsetAmount + dayAmount * 0.45) * sunHalo * mix(0.02, 0.28, 1.0 - nightAmount);
+      color += mix(vec3(0.08, 0.1, 0.16), vec3(1.0, 0.78, 0.44), sunsetAmount) * sunCore * mix(0.0, 0.18, 1.0 - nightAmount);
+
+      float horizonPx = mix(11.0, 15.5, 1.0 - abs(sx));
+      horizonPx += ridge(sx, -0.96, 0.075, 1.8);
+      horizonPx += ridge(sx, -0.48, 0.05, 1.2);
+      horizonPx += ridge(sx, 0.05, 0.045, 2.1);
+      horizonPx += ridge(sx, 0.62, 0.07, 1.4);
+      horizonPx += pow(max(noise1D(sx * 4.6 + 1.2) - 0.46, 0.0) * 1.9, 2.5) * 1.8;
+      horizonPx += pow(max(noise1D(sx * 14.0 + 5.4) - 0.5, 0.0) * 2.2, 3.2) * 0.9;
+      horizonPx += pow(max(noise1D(sx * 52.0 + 11.1) - 0.48, 0.0) * 2.4, 4.2) * 0.45;
+      horizonPx += pow(max(noise1D(sx * 135.0 + 19.4) - 0.52, 0.0) * 2.8, 5.0) * 0.3;
+      horizonPx = min(horizonPx, 20.0);
+      float bottomPx = screenCoord.y;
+      float earthMask = 1.0 - smoothstep(horizonPx - 0.35, horizonPx + 0.75, bottomPx);
+      color *= 1.0 - earthMask;
+
+      fragColor = vec4(color, 1.0);
+    }
+  `,
+});
+wordmarkScene.add(new THREE.Mesh(geometry, wordmarkMaterial));
+
 function resize() {
   const width = Math.ceil(window.visualViewport?.width ?? window.innerWidth);
   const height = Math.ceil(window.visualViewport?.height ?? window.innerHeight);
 
   renderer.setSize(width, height, true);
   material.uniforms.uResolution.value.set(width, height);
+  wordmarkMaterial.uniforms.uResolution.value.set(width, height);
 }
 
 resize();
 window.addEventListener("resize", resize);
+
+const wordmarkResizeObserver = new ResizeObserver(() => {
+  renderWordmark();
+});
+wordmarkResizeObserver.observe(wordmark);
+
+function drawTrackedText(context, text, centerX, baselineY, tracking) {
+  if (!tracking) {
+    context.fillText(text, centerX, baselineY);
+    return;
+  }
+
+  const glyphs = Array.from(text);
+  const widths = glyphs.map((glyph) => context.measureText(glyph).width);
+  const totalWidth =
+    widths.reduce((sum, width) => sum + width, 0) + tracking * Math.max(glyphs.length - 1, 0);
+  let cursor = centerX - totalWidth / 2;
+
+  glyphs.forEach((glyph, index) => {
+    context.fillText(glyph, cursor, baselineY);
+    cursor += widths[index] + tracking;
+  });
+}
+
+function renderWordmark() {
+  const bounds = wordmark.getBoundingClientRect();
+  const bleed =
+    (Number.parseFloat(window.getComputedStyle(wordmark).getPropertyValue("--wordmark-bleed")) || 0) *
+    renderPixelRatio;
+  const innerWidth = Math.max(1, Math.round(bounds.width * renderPixelRatio));
+  const innerHeight = Math.max(1, Math.round(bounds.height * renderPixelRatio));
+  const width = innerWidth + Math.round(bleed * 2);
+  const height = innerHeight + Math.round(bleed * 2);
+
+  if (wordmarkCanvas.width !== width || wordmarkCanvas.height !== height) {
+    wordmarkCanvas.width = width;
+    wordmarkCanvas.height = height;
+    wordmarkRenderer.setSize(bounds.width + bleed * 2 / renderPixelRatio, bounds.height + bleed * 2 / renderPixelRatio, false);
+  }
+
+  wordmarkMaterial.uniforms.uViewportOffset.value.set(
+    bounds.left * renderPixelRatio - bleed,
+    ((window.visualViewport?.height ?? window.innerHeight) - bounds.bottom) * renderPixelRatio - bleed,
+  );
+  wordmarkRenderer.render(wordmarkScene, wordmarkCamera);
+
+  const computed = window.getComputedStyle(wordmark);
+  const fontSize = Number.parseFloat(computed.fontSize) * renderPixelRatio;
+  const letterSpacing = (Number.parseFloat(computed.letterSpacing) || 0) * renderPixelRatio;
+
+  wordmarkContext.setTransform(1, 0, 0, 1, 0, 0);
+  wordmarkContext.clearRect(0, 0, width, height);
+  wordmarkContext.drawImage(wordmarkRenderCanvas, 0, 0, width, height);
+  wordmarkContext.globalCompositeOperation = "destination-in";
+  wordmarkContext.fillStyle = "#ffffff";
+  wordmarkContext.font = `${computed.fontWeight} ${fontSize}px ${computed.fontFamily}`;
+  wordmarkContext.textAlign = "center";
+  wordmarkContext.textBaseline = "alphabetic";
+  const metrics = wordmarkContext.measureText(wordmarkText);
+  const baselineY =
+    bleed + (innerHeight + metrics.actualBoundingBoxAscent - metrics.actualBoundingBoxDescent) / 2;
+  drawTrackedText(wordmarkContext, wordmarkText, width / 2, baselineY, letterSpacing);
+  wordmarkContext.globalCompositeOperation = "source-over";
+}
 
 const targetPointer = new THREE.Vector2(0, 0);
 const currentPointer = new THREE.Vector2(0, 0);
@@ -582,6 +780,10 @@ function setTargetFromClient(clientX, clientY) {
 resetPointer();
 getAutoSunUv(currentBaseSun, 0);
 currentSun.copy(currentBaseSun);
+wordmarkMaterial.uniforms.uPointer.value.copy(currentPointer);
+wordmarkMaterial.uniforms.uSunBaseUv.value.copy(currentBaseSun);
+wordmarkMaterial.uniforms.uSunUv.value.copy(currentSun);
+renderWordmark();
 
 window.addEventListener("pointermove", (event) => {
   setTargetFromClient(event.clientX, event.clientY);
@@ -630,7 +832,12 @@ function render() {
   material.uniforms.uPointer.value.copy(currentPointer);
   material.uniforms.uSunBaseUv.value.copy(currentBaseSun);
   material.uniforms.uSunUv.value.copy(currentSun);
+  wordmarkMaterial.uniforms.uTime.value = clock.elapsedTime;
+  wordmarkMaterial.uniforms.uPointer.value.copy(currentPointer);
+  wordmarkMaterial.uniforms.uSunBaseUv.value.copy(currentBaseSun);
+  wordmarkMaterial.uniforms.uSunUv.value.copy(currentSun);
   renderer.render(scene, camera);
+  renderWordmark();
   window.requestAnimationFrame(render);
 }
 
