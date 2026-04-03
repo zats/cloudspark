@@ -566,6 +566,12 @@ final class StatusController: NSObject, NSMenuDelegate {
             return
         }
 
+        let shouldShowAccountEmail = Set(
+            overviewProjectsByID.values
+                .filter { $0.kind == .worker }
+                .map(\.accountID)
+        ).count > 1
+
         projects = overviewProjectsByID.values
             .map { baseProject in
                 switch baseProject.kind {
@@ -573,6 +579,7 @@ final class StatusController: NSObject, NSMenuDelegate {
                     let latestBuild = baseProject.buildID.flatMap { latestBuildsByID[$0] }
                     return DashboardProject(
                         accountID: baseProject.accountID,
+                        accountEmail: shouldShowAccountEmail ? accountEmail(for: baseProject.accountID) : nil,
                         kind: .worker,
                         name: baseProject.name,
                         subtitle: latestBuild?.branch ?? baseProject.subtitle,
@@ -587,6 +594,7 @@ final class StatusController: NSObject, NSMenuDelegate {
                     let deployment = pageDeploymentsByID[baseProject.id]
                     return DashboardProject(
                         accountID: baseProject.accountID,
+                        accountEmail: shouldShowAccountEmail ? accountEmail(for: baseProject.accountID) : nil,
                         kind: .page,
                         name: baseProject.name,
                         subtitle: baseProject.subtitle,
@@ -670,6 +678,10 @@ final class StatusController: NSObject, NSMenuDelegate {
         return build.status?.lowercased() ?? "unknown"
     }
 
+    private func accountEmail(for accountID: String) -> String? {
+        sessions.first(where: { $0.accountID == accountID })?.userEmail
+    }
+
     private func recordBuildChanges(
         from previousBuilds: [String: DashboardBuild],
         to nextBuilds: [String: DashboardBuild]
@@ -741,6 +753,9 @@ final class StatusController: NSObject, NSMenuDelegate {
         }
         if build.isFailed {
             return "exclamationmark.icloud.fill"
+        }
+        if build.isSuccessful {
+            return "checkmark.icloud.fill"
         }
         return "icloud.fill"
     }

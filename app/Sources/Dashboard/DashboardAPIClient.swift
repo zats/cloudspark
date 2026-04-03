@@ -87,6 +87,7 @@ final class DashboardAPIClient {
                 let script = environment?["script"] as? [String: Any]
                 return DashboardProject(
                     accountID: accountID,
+                    accountEmail: nil,
                     kind: .worker,
                     name: name,
                     subtitle: nil,
@@ -109,6 +110,7 @@ final class DashboardAPIClient {
                 }
                 return DashboardProject(
                     accountID: accountID,
+                    accountEmail: nil,
                     kind: .page,
                     name: name,
                     subtitle: project["subdomain"] as? String,
@@ -140,6 +142,7 @@ final class DashboardAPIClient {
             }
             return DashboardProject(
                 accountID: accountID,
+                accountEmail: nil,
                 kind: .worker,
                 name: name,
                 subtitle: nil,
@@ -172,6 +175,7 @@ final class DashboardAPIClient {
             let metadata = trigger?["metadata"] as? [String: Any]
             return DashboardProject(
                 accountID: accountID,
+                accountEmail: nil,
                 kind: .page,
                 name: name,
                 subtitle: item["subdomain"] as? String,

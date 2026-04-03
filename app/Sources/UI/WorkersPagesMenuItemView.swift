@@ -8,6 +8,7 @@ final class WorkersPagesMenuItemView: NSView {
     private let subtitleLabel = NSTextField(labelWithString: "")
     private let statusIconView = NSImageView()
     private let metricsStack = NSStackView()
+    private let accountLabel = NSTextField(labelWithString: "")
     private let requestsItem = MetricItemView(symbolName: "chart.xyaxis.line")
     private let errorsItem = MetricItemView(symbolName: "xmark.icloud")
     private let cpuItem = MetricItemView(symbolName: "cpu")
@@ -52,6 +53,8 @@ final class WorkersPagesMenuItemView: NSView {
         errorsItem.update(text: project.metrics.map { formatCompactInt($0.errors) })
         cpuItem.update(text: project.metrics.map { formatCPUTime($0.averageCPUTimeMS) })
         releaseItem.update(text: project.lastReleaseAt.map(formatRelativeDate))
+        accountLabel.stringValue = project.accountEmail ?? ""
+        accountLabel.isHidden = (project.accountEmail?.isEmpty ?? true)
 
         let hasVisibleMetrics = [requestsItem, errorsItem, cpuItem, releaseItem].contains { !$0.isHidden }
         metricsStack.isHidden = !hasVisibleMetrics
@@ -87,12 +90,19 @@ final class WorkersPagesMenuItemView: NSView {
         metricsStack.translatesAutoresizingMaskIntoConstraints = false
         [requestsItem, errorsItem, cpuItem, releaseItem].forEach(metricsStack.addArrangedSubview)
 
+        accountLabel.font = NSFont.systemFont(ofSize: 9, weight: .regular)
+        accountLabel.textColor = .tertiaryLabelColor
+        accountLabel.lineBreakMode = .byTruncatingHead
+        accountLabel.alignment = .right
+        accountLabel.translatesAutoresizingMaskIntoConstraints = false
+
         let labels = NSStackView(views: [nameLabel, subtitleLabel, metricsStack])
         labels.orientation = .vertical
         labels.alignment = .leading
         labels.spacing = 2
         labels.translatesAutoresizingMaskIntoConstraints = false
         addSubview(labels)
+        addSubview(accountLabel)
 
         statusIconView.translatesAutoresizingMaskIntoConstraints = false
         statusIconView.setContentHuggingPriority(.required, for: .horizontal)
@@ -117,8 +127,12 @@ final class WorkersPagesMenuItemView: NSView {
             statusIconView.widthAnchor.constraint(equalToConstant: 14),
             statusIconView.heightAnchor.constraint(equalToConstant: 14),
 
+            accountLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            accountLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+            accountLabel.leadingAnchor.constraint(greaterThanOrEqualTo: labels.leadingAnchor, constant: 80),
+
             labels.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 10),
-            labels.trailingAnchor.constraint(lessThanOrEqualTo: statusIconView.leadingAnchor, constant: -10),
+            labels.trailingAnchor.constraint(lessThanOrEqualTo: accountLabel.leadingAnchor, constant: -10),
             labels.topAnchor.constraint(equalTo: topAnchor, constant: 8),
             labels.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -10),
         ])
@@ -131,8 +145,10 @@ final class WorkersPagesMenuItemView: NSView {
             : NSColor.clear.cgColor
         let primary = highlighted ? NSColor.selectedMenuItemTextColor : NSColor.labelColor
         let secondary = highlighted ? NSColor.selectedMenuItemTextColor.withAlphaComponent(0.8) : NSColor.secondaryLabelColor
+        let tertiary = highlighted ? NSColor.selectedMenuItemTextColor.withAlphaComponent(0.55) : NSColor.tertiaryLabelColor
         nameLabel.textColor = primary
         subtitleLabel.textColor = secondary
+        accountLabel.textColor = tertiary
         iconView.contentTintColor = secondary
         statusIconView.contentTintColor = highlighted
             ? NSColor.selectedMenuItemTextColor

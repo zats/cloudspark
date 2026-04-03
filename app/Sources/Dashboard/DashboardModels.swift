@@ -119,6 +119,7 @@ enum DashboardProjectKind {
 
 struct DashboardProject {
     let accountID: String
+    let accountEmail: String?
     let kind: DashboardProjectKind
     let name: String
     let subtitle: String?
