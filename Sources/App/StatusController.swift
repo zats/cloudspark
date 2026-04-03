@@ -179,6 +179,9 @@ final class StatusController: NSObject, NSMenuDelegate {
                 syncMenuState()
                 settingsController.refresh(sessions: sessions)
             } catch {
+                if case DashboardError.userCancelledLogin = error {
+                    return
+                }
                 if !silent {
                     presentError(error)
                 }
@@ -420,6 +423,9 @@ final class StatusController: NSObject, NSMenuDelegate {
                         self.scheduleRefresh()
                         self.settingsController.refresh(sessions: self.sessions)
                     } catch {
+                        if case DashboardError.userCancelledLogin = error {
+                            return
+                        }
                         self.presentError(error)
                     }
                 }

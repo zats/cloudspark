@@ -39,7 +39,7 @@ enum BuildNotificationManager {
         )
         UNUserNotificationCenter.current().add(request) { error in
             if let error {
-                NSLog("CloudSpark notification error: %@", error.localizedDescription)
+                NSLog("Cloudspark notification error: %@", error.localizedDescription)
             }
         }
     }

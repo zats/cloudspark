@@ -7,16 +7,16 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		0F68AA4970B01E3514FF3278 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F3FD894AADDE25170CA213CD /* Assets.xcassets */; };
+		CA0CA7B8E1CFB0CF7EBDA1B7 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C0F8A0BFA3F98DA4346F344F /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		12455EACF6B12AA0A7CD0819 /* CloudSpark.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CloudSpark.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		F3FD894AADDE25170CA213CD /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		C0F8A0BFA3F98DA4346F344F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		FA78B49A7665B732129FBA8A /* Cloudspark.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Cloudspark.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		F73BB10685A55630E8E63B32 /* Sources */ = {
+		EC047B61B281880325D9CC02 /* Sources */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			explicitFileTypes = {
 			};
@@ -28,71 +28,71 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXGroup section */
-		5DC3D7C379C861742B18F399 /* Sources */ = {
+		8F298AA874A0544716CC3979 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				F3FD894AADDE25170CA213CD /* Assets.xcassets */,
-			);
-			path = Sources;
-			sourceTree = "<group>";
-		};
-		6A394CAD7A7E05D31636A000 /* Products */ = {
-			isa = PBXGroup;
-			children = (
-				12455EACF6B12AA0A7CD0819 /* CloudSpark.app */,
+				FA78B49A7665B732129FBA8A /* Cloudspark.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
 		};
-		76448BBDF60971BBAABA662D = {
+		A09D504BC5028009152235F0 /* Sources */ = {
 			isa = PBXGroup;
 			children = (
-				F73BB10685A55630E8E63B32 /* Sources */,
-				5DC3D7C379C861742B18F399 /* Sources */,
-				6A394CAD7A7E05D31636A000 /* Products */,
+				C0F8A0BFA3F98DA4346F344F /* Assets.xcassets */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		BB74A6FFD1F92B5681328D74 = {
+			isa = PBXGroup;
+			children = (
+				EC047B61B281880325D9CC02 /* Sources */,
+				A09D504BC5028009152235F0 /* Sources */,
+				8F298AA874A0544716CC3979 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		C67977019FE4EBAAEFAFF1F0 /* CloudSpark */ = {
+		B509F7CCE51FC1C35644A12A /* Cloudspark */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = B1BFA78808D2D32EDC2285EE /* Build configuration list for PBXNativeTarget "CloudSpark" */;
+			buildConfigurationList = 0C59A9B37BD2BDD381BAAA1C /* Build configuration list for PBXNativeTarget "Cloudspark" */;
 			buildPhases = (
-				2EBF745EC8BA0E80CC92E6CC /* Sources */,
-				83E730A6E2A1D870EDE98750 /* Resources */,
+				1A42EF0B4910751D34F6C70B /* Sources */,
+				3574DF7E316E3705CF02CF43 /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				F73BB10685A55630E8E63B32 /* Sources */,
+				EC047B61B281880325D9CC02 /* Sources */,
 			);
-			name = CloudSpark;
+			name = Cloudspark;
 			packageProductDependencies = (
 			);
-			productName = CloudSpark;
-			productReference = 12455EACF6B12AA0A7CD0819 /* CloudSpark.app */;
+			productName = Cloudspark;
+			productReference = FA78B49A7665B732129FBA8A /* Cloudspark.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		4318BAC61B38492501F5BA89 /* Project object */ = {
+		C7443B6268B5200E30AA2107 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
-					C67977019FE4EBAAEFAFF1F0 = {
+					B509F7CCE51FC1C35644A12A = {
 						DevelopmentTeam = 5KE88HWMKJ;
 						ProvisioningStyle = Automatic;
 					};
 				};
 			};
-			buildConfigurationList = C144E85DBA1553ED7B89BFC5 /* Build configuration list for PBXProject "CloudSpark" */;
+			buildConfigurationList = CC89C2CAA829F20A785E3B52 /* Build configuration list for PBXProject "Cloudspark" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -100,30 +100,30 @@
 				Base,
 				en,
 			);
-			mainGroup = 76448BBDF60971BBAABA662D;
+			mainGroup = BB74A6FFD1F92B5681328D74;
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				C67977019FE4EBAAEFAFF1F0 /* CloudSpark */,
+				B509F7CCE51FC1C35644A12A /* Cloudspark */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		83E730A6E2A1D870EDE98750 /* Resources */ = {
+		3574DF7E316E3705CF02CF43 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				0F68AA4970B01E3514FF3278 /* Assets.xcassets in Resources */,
+				CA0CA7B8E1CFB0CF7EBDA1B7 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		2EBF745EC8BA0E80CC92E6CC /* Sources */ = {
+		1A42EF0B4910751D34F6C70B /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -133,37 +133,7 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
-		4973DB7BCEF3E87C9357FAAC /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = Support/cloudflare2/Cloudflare2.entitlements;
-				COMBINE_HIDPI_IMAGES = YES;
-				INFOPLIST_FILE = Support/cloudflare2/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/../Frameworks",
-				);
-				SDKROOT = macosx;
-			};
-			name = Debug;
-		};
-		7374BC10CD15E04CAA5C3EB1 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = Support/cloudflare2/Cloudflare2.entitlements;
-				COMBINE_HIDPI_IMAGES = YES;
-				INFOPLIST_FILE = Support/cloudflare2/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/../Frameworks",
-				);
-				SDKROOT = macosx;
-			};
-			name = Release;
-		};
-		AA08C9218B94F8A131CC5270 /* Debug */ = {
+		4FF7EC37F6EA3B935788F7A0 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -221,13 +191,13 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Support/cloudflare2/Info.plist;
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 1.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
-				PRODUCT_BUNDLE_IDENTIFIER = com.zats.cloudspark;
-				PRODUCT_NAME = CloudSpark;
+				PRODUCT_BUNDLE_IDENTIFIER = com.zats.cloudspark2;
+				PRODUCT_NAME = Cloudspark;
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -235,7 +205,7 @@
 			};
 			name = Debug;
 		};
-		DE848E2E4F2E516BEC14134D /* Release */ = {
+		59C231ABEA402BB431CDF6B0 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -287,12 +257,12 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Support/cloudflare2/Info.plist;
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 1.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
-				PRODUCT_BUNDLE_IDENTIFIER = com.zats.cloudspark;
-				PRODUCT_NAME = CloudSpark;
+				PRODUCT_BUNDLE_IDENTIFIER = com.zats.cloudspark2;
+				PRODUCT_NAME = Cloudspark;
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
@@ -300,28 +270,58 @@
 			};
 			name = Release;
 		};
+		6B1BA90B36974F972ABAC07E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Support/cloudflare2/Cloudflare2.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = Support/cloudflare2/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		7242AE3D7919EECFD2C268F8 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Support/cloudflare2/Cloudflare2.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = Support/cloudflare2/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		B1BFA78808D2D32EDC2285EE /* Build configuration list for PBXNativeTarget "CloudSpark" */ = {
+		0C59A9B37BD2BDD381BAAA1C /* Build configuration list for PBXNativeTarget "Cloudspark" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				4973DB7BCEF3E87C9357FAAC /* Debug */,
-				7374BC10CD15E04CAA5C3EB1 /* Release */,
+				6B1BA90B36974F972ABAC07E /* Debug */,
+				7242AE3D7919EECFD2C268F8 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
-		C144E85DBA1553ED7B89BFC5 /* Build configuration list for PBXProject "CloudSpark" */ = {
+		CC89C2CAA829F20A785E3B52 /* Build configuration list for PBXProject "Cloudspark" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				AA08C9218B94F8A131CC5270 /* Debug */,
-				DE848E2E4F2E516BEC14134D /* Release */,
+				4FF7EC37F6EA3B935788F7A0 /* Debug */,
+				59C231ABEA402BB431CDF6B0 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
 	};
-	rootObject = 4318BAC61B38492501F5BA89 /* Project object */;
+	rootObject = C7443B6268B5200E30AA2107 /* Project object */;
 }

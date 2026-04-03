@@ -2,7 +2,7 @@ import AppKit
 
 @MainActor
 @main
-enum CloudSparkApp {
+enum CloudsparkApp {
     private static let appDelegate = AppDelegate()
 
     static func main() {

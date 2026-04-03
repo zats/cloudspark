@@ -8,7 +8,7 @@ final class DashboardAuthenticator: NSObject {
     private var window: NSWindow?
     private weak var parentWindow: NSWindow?
     private var webView: WKWebView?
-    private var loadingAccessoryView: NSView?
+    private var cancelButton: NSButton?
     private var loadingIndicator: NSProgressIndicator?
     private var xAtok: String?
     private var hasBootstrapUser = false
@@ -25,6 +25,7 @@ final class DashboardAuthenticator: NSObject {
             self.completion = completion
             if let parentWindow, window.sheetParent !== parentWindow {
                 window.orderOut(nil)
+                self.parentWindow = parentWindow
                 parentWindow.beginSheet(window)
             } else {
                 window.makeKeyAndOrderFront(nil)
@@ -64,17 +65,23 @@ final class DashboardAuthenticator: NSObject {
         window.delegate = self
 
         let container = NSView(frame: frame)
-        container.autoresizingMask = [.width, .height]
-        webView.frame = container.bounds
-        container.addSubview(webView)
-        let loadingAccessoryView = makeLoadingAccessoryView()
-        self.loadingAccessoryView = loadingAccessoryView
+        container.translatesAutoresizingMaskIntoConstraints = false
+        webView.translatesAutoresizingMaskIntoConstraints = false
+        let toolbar = makeToolbar()
         window.contentView = container
-        let accessory = NSTitlebarAccessoryViewController()
-        accessory.layoutAttribute = .right
-        accessory.view = loadingAccessoryView
-        loadingAccessoryView.frame = NSRect(x: 0, y: 0, width: 24, height: 24)
-        window.addTitlebarAccessoryViewController(accessory)
+        container.addSubview(toolbar)
+        container.addSubview(webView)
+        NSLayoutConstraint.activate([
+            toolbar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            toolbar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            toolbar.topAnchor.constraint(equalTo: container.topAnchor),
+            toolbar.heightAnchor.constraint(equalToConstant: 48),
+
+            webView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            webView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            webView.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
+            webView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
         if let parentWindow {
             parentWindow.beginSheet(window)
         } else {
@@ -93,28 +100,47 @@ final class DashboardAuthenticator: NSObject {
         startPolling()
     }
 
-    private func makeLoadingAccessoryView() -> NSView {
+    private func makeToolbar() -> NSView {
         let container = NSView(frame: .zero)
         container.translatesAutoresizingMaskIntoConstraints = false
 
+        let button = NSButton(image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "Cancel")!, target: self, action: #selector(cancelLogin))
+        button.bezelStyle = .glass
+        button.borderShape = .circle
+        button.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
+        button.imagePosition = .imageOnly
+        button.imageScaling = .scaleProportionallyDown
+        button.contentTintColor = .labelColor
+        button.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(button)
+        cancelButton = button
+
         let indicator = NSProgressIndicator(frame: .zero)
         indicator.style = .spinning
-        indicator.controlSize = .small
+        indicator.controlSize = .large
         indicator.translatesAutoresizingMaskIntoConstraints = false
         indicator.startAnimation(nil)
         container.addSubview(indicator)
         self.loadingIndicator = indicator
 
         NSLayoutConstraint.activate([
-            indicator.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            button.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            button.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            button.widthAnchor.constraint(equalToConstant: 28),
+            button.heightAnchor.constraint(equalToConstant: 28),
+
+            indicator.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
             indicator.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            indicator.widthAnchor.constraint(equalToConstant: 20),
+            indicator.heightAnchor.constraint(equalToConstant: 20),
         ])
 
         return container
     }
 
     private func setLoading(_ isLoading: Bool) {
-        loadingAccessoryView?.isHidden = !isLoading
+        loadingIndicator?.isHidden = !isLoading
+        cancelButton?.isEnabled = !isCompletingSession
         if isLoading {
             loadingIndicator?.startAnimation(nil)
         } else {
@@ -215,6 +241,7 @@ final class DashboardAuthenticator: NSObject {
         )
 
         isCompletingSession = true
+        setLoading(true)
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
@@ -265,7 +292,7 @@ final class DashboardAuthenticator: NSObject {
         self.window = nil
         self.parentWindow = nil
         self.webView = nil
-        loadingAccessoryView = nil
+        cancelButton = nil
         loadingIndicator = nil
         xAtok = nil
         hasBootstrapUser = false
@@ -292,6 +319,11 @@ final class DashboardAuthenticator: NSObject {
         }
     }
 
+    @objc
+    private func cancelLogin() {
+        finish(.failure(DashboardError.userCancelledLogin))
+    }
+
     private static let acceptLanguage = "en-US,en;q=0.9"
     private static let userAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Mobile/15E148 Safari/604.1"
 }
@@ -302,7 +334,6 @@ extension DashboardAuthenticator: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        setLoading(false)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
