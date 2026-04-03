@@ -1,5 +1,5 @@
 :root {
-  color: #111111;
+  color: #ffffff;
   background: #ffffff;
   font-family: "Helvetica Neue", "Neue Haas Grotesk Text Pro", "Arial", sans-serif;
 }
@@ -63,6 +63,8 @@ body {
   padding: 32px;
   justify-items: center;
   text-align: center;
+  color: #ffffff;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.26);
 }
 
 .eyebrow,
@@ -75,7 +77,7 @@ body {
   font-size: 0.78rem;
   letter-spacing: 0.2em;
   text-transform: uppercase;
-  color: rgba(17, 17, 17, 0.56);
+  color: rgba(255, 255, 255, 0.86);
 }
 
 h1 {
@@ -92,7 +94,7 @@ h1 {
   max-width: 22rem;
   font-size: 1rem;
   line-height: 1.5;
-  color: rgba(17, 17, 17, 0.68);
+  color: rgba(255, 255, 255, 0.92);
 }
 
 .cta {
@@ -105,6 +107,7 @@ h1 {
   border-radius: 4px;
   background: #111111;
   color: #ffffff;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.28);
   text-decoration: none;
   font-size: 0.98rem;
   letter-spacing: -0.02em;
