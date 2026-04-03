@@ -267,6 +267,10 @@ const material = new THREE.ShaderMaterial({
       float bottom = mix(0.2, 0.48, smoothstep(0.18, 0.82, coverage)) + (1.0 - islandMask) * 0.1;
       float top = mix(0.9, 1.85, smoothstep(0.4, 0.95, max(cellMask, towerMask)));
       top += clusterCore * 0.14;
+      float cloudMid = (bottom + top) * 0.5;
+      float cloudHeight = (top - bottom) * 3.0;
+      bottom = cloudMid - cloudHeight / 3.0;
+      top = cloudMid + cloudHeight * (2.0 / 3.0);
       float heightFrac = clamp((p.y - bottom) / max(top - bottom, 0.001), 0.0, 1.0);
       float baseLift = smoothstep(0.0, 0.08, heightFrac);
       float crownFade = 1.0 - smoothstep(0.7, 1.0, heightFrac);
@@ -306,8 +310,12 @@ const material = new THREE.ShaderMaterial({
       return max(density * 1.9, 0.0);
     }
 
+    vec2 sceneScale() {
+      return vec2(uResolution.x / max(uResolution.y, 1.0), 1.0);
+    }
+
     vec2 uvToScene(vec2 uv) {
-      return (uv * 2.0 - 1.0) * (uResolution.xy / min(uResolution.x, uResolution.y));
+      return (uv * 2.0 - 1.0) * sceneScale();
     }
 
     float ridge(float x, float center, float width, float height) {
@@ -332,16 +340,15 @@ const material = new THREE.ShaderMaterial({
     }
 
     void main() {
-      float minRes = min(uResolution.x, uResolution.y);
-      float pixelToScene = 2.0 / minRes;
-      vec2 p = (gl_FragCoord.xy * 2.0 - uResolution.xy) / min(uResolution.x, uResolution.y);
+      float pixelToScene = 2.0 / max(uResolution.y, 1.0);
+      vec2 p = gl_FragCoord.xy / uResolution.xy * 2.0 - 1.0;
+      p.x *= sceneScale().x;
       float sx = gl_FragCoord.x / uResolution.x * 2.0 - 1.0;
       float bottomPx = gl_FragCoord.y;
       vec2 follow = vec2(uPointer.x * 0.12, uPointer.y * 0.07);
       float time = uTime * 0.035;
       vec3 wind = vec3(time, 0.0, time * 0.32);
       vec2 sunPos = uvToScene(uSunUv);
-      vec2 baseSunPos = uvToScene(uSunBaseUv);
       float sunX = clamp(uSunUv.x, 0.0, 1.0);
       float sunY = clamp(uSunUv.y, 0.0, 1.0);
       float dayAmount = smoothstep(0.14, 0.46, uSunBaseUv.y);
@@ -357,8 +364,6 @@ const material = new THREE.ShaderMaterial({
       horizonPx += pow(max(noise1D(sx * 52.0 + 11.1) - 0.48, 0.0) * 2.4, 4.2) * 0.45;
       horizonPx += pow(max(noise1D(sx * 135.0 + 19.4) - 0.52, 0.0) * 2.8, 5.0) * 0.3;
       horizonPx = min(horizonPx, 20.0);
-      float horizonY = -uResolution.y / minRes + horizonPx * pixelToScene;
-
       vec3 skyTop = mix(vec3(0.03, 0.05, 0.1), vec3(0.46, 0.69, 0.96), dayAmount);
       skyTop = mix(skyTop, vec3(0.98, 0.96, 0.93), sunsetAmount);
       vec3 skyMid = mix(vec3(0.05, 0.08, 0.16), vec3(0.78, 0.88, 0.99), dayAmount);
@@ -556,8 +561,12 @@ const wordmarkMaterial = new THREE.ShaderMaterial({
 
     out vec4 fragColor;
 
+    vec2 sceneScale() {
+      return vec2(uResolution.x / max(uResolution.y, 1.0), 1.0);
+    }
+
     vec2 uvToScene(vec2 uv) {
-      return (uv * 2.0 - 1.0) * (uResolution.xy / min(uResolution.x, uResolution.y));
+      return (uv * 2.0 - 1.0) * sceneScale();
     }
 
     float ridge(float x, float center, float width, float height) {
@@ -578,8 +587,8 @@ const wordmarkMaterial = new THREE.ShaderMaterial({
 
     void main() {
       vec2 screenCoord = gl_FragCoord.xy + uViewportOffset;
-      float minRes = min(uResolution.x, uResolution.y);
-      vec2 p = (screenCoord * 2.0 - uResolution.xy) / minRes;
+      vec2 p = screenCoord / uResolution.xy * 2.0 - 1.0;
+      p.x *= sceneScale().x;
       vec2 follow = vec2(uPointer.x * 0.12, uPointer.y * 0.07);
       float time = uTime * 0.035;
       vec3 wind = vec3(time, 0.0, time * 0.32);
@@ -638,8 +647,8 @@ const wordmarkMaterial = new THREE.ShaderMaterial({
 wordmarkScene.add(new THREE.Mesh(geometry, wordmarkMaterial));
 
 function resize() {
-  const width = Math.ceil(window.visualViewport?.width ?? window.innerWidth);
-  const height = Math.ceil(window.visualViewport?.height ?? window.innerHeight);
+  const width = Math.ceil(window.innerWidth);
+  const height = Math.ceil(window.innerHeight);
 
   renderer.setSize(width, height, true);
   material.uniforms.uResolution.value.set(width, height);
@@ -690,7 +699,7 @@ function renderWordmark() {
 
   wordmarkMaterial.uniforms.uViewportOffset.value.set(
     bounds.left * renderPixelRatio - bleed,
-    ((window.visualViewport?.height ?? window.innerHeight) - bounds.bottom) * renderPixelRatio - bleed,
+    (window.innerHeight - bounds.bottom) * renderPixelRatio - bleed,
   );
   wordmarkRenderer.render(wordmarkScene, wordmarkCamera);
 
@@ -734,8 +743,8 @@ function resetPointer() {
 }
 
 function setTargetFromClient(clientX, clientY) {
-  const width = window.visualViewport?.width ?? window.innerWidth;
-  const height = window.visualViewport?.height ?? window.innerHeight;
+  const width = window.innerWidth;
+  const height = window.innerHeight;
   const x = THREE.MathUtils.clamp(clientX / width, 0, 1);
   const y = THREE.MathUtils.clamp(clientY / height, 0, 1);
   targetPointer.set(x * 2 - 1, (1 - y) * 2 - 1);

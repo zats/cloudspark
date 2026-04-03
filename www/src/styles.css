@@ -71,14 +71,12 @@ h1 {
   display: inline-block;
   --wordmark-bleed: 18px;
   margin: 0;
-  margin-bottom: 40px;
   max-width: 9ch;
   font-size: clamp(3.5rem, 10vw, 7.5rem);
   line-height: 0.9;
   letter-spacing: inherit;
   font-weight: 500;
   color: transparent;
-  /* text-shadow: none; */
   -webkit-text-fill-color: transparent;
 }
 
@@ -121,4 +119,9 @@ h1 {
   overflow: visible;
   margin-top: -0.3rem;
   margin-left: -1rem;
+}
+
+.footer {
+  position: absolute;
+  bottom: 3rem;
 }
