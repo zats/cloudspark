@@ -1,18 +1,8 @@
 import * as THREE from "three";
 import "./styles.css";
 
-function resolveDownloadUrl() {
-  const { hostname, pathname } = window.location;
-  const pagesHost = hostname.match(/^([^.]+)\.github\.io$/);
-
-  if (pagesHost) {
-    const owner = pagesHost[1];
-    const repo = pathname.split("/").filter(Boolean)[0] ?? `${owner}.github.io`;
-    return `https://github.com/${owner}/${repo}/releases/latest`;
-  }
-
-  return "https://github.com/OWNER/REPO/releases/latest";
-}
+const DOWNLOAD_URL =
+  "https://github.com/zats/cloudspark/releases/latest/download/Cloudspark-macos.zip";
 
 function mulberry32(seed) {
   let state = seed >>> 0;
@@ -120,7 +110,7 @@ const detailNoise = buildWorleyVolume(16, [4, 6, 8, 10], 7331);
 
 const downloadLink = document.querySelector("#download-link");
 if (downloadLink) {
-  downloadLink.href = resolveDownloadUrl();
+  downloadLink.href = DOWNLOAD_URL;
 }
 const themeColorMeta = document.querySelector('meta[name="theme-color"]');
 let themeColorValue = themeColorMeta?.content ?? "";
