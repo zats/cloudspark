@@ -326,6 +326,11 @@ const material = new THREE.ShaderMaterial({
       return mix(hash11(i), hash11(i + 1.0), u);
     }
 
+    float cloudHalfSpanX() {
+      float aspect = uResolution.x / max(uResolution.y, 1.0);
+      return 3.4 * max(aspect / 1.6, 1.0);
+    }
+
     void main() {
       float minRes = min(uResolution.x, uResolution.y);
       float pixelToScene = 2.0 / minRes;
@@ -411,7 +416,8 @@ const material = new THREE.ShaderMaterial({
         color *= 1.0 - horizonBand * (1.0 - shaftLight) * 0.14;
       }
 
-      vec2 hit = intersectBox(ro, rd, vec3(-3.4, -1.8, -1.2), vec3(3.4, 7.2, 6.0));
+      float cloudSpanX = cloudHalfSpanX();
+      vec2 hit = intersectBox(ro, rd, vec3(-cloudSpanX, -1.8, -1.2), vec3(cloudSpanX, 7.2, 6.0));
       float transmittance = 1.0;
       vec3 cloudLight = vec3(0.0);
 

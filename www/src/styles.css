@@ -122,16 +122,3 @@ h1 {
   margin-top: -0.3rem;
   margin-left: -1rem;
 }
-
-@media (max-width: 640px) {
-  .hero {
-    padding: 24px;
-    align-content: end;
-    padding-bottom: 72px;
-  }
-
-  h1 {
-    max-width: 7ch;
-    font-size: clamp(3rem, 16vw, 4.8rem);
-  }
-}
