@@ -122,6 +122,8 @@ const downloadLink = document.querySelector("#download-link");
 if (downloadLink) {
   downloadLink.href = resolveDownloadUrl();
 }
+const themeColorMeta = document.querySelector('meta[name="theme-color"]');
+let themeColorValue = themeColorMeta?.content ?? "";
 const wordmark = document.querySelector("h1");
 const wordmarkText = wordmark.textContent.trim();
 const wordmarkCanvas = document.createElement("canvas");
@@ -129,6 +131,47 @@ wordmarkCanvas.className = "wordmark-canvas";
 wordmarkCanvas.setAttribute("aria-hidden", "true");
 wordmark.append(wordmarkCanvas);
 const wordmarkContext = wordmarkCanvas.getContext("2d");
+
+function clamp01(value) {
+  return Math.min(Math.max(value, 0), 1);
+}
+
+function smoothstepJs(edge0, edge1, value) {
+  const t = clamp01((value - edge0) / (edge1 - edge0));
+  return t * t * (3 - 2 * t);
+}
+
+function mixScalar(a, b, t) {
+  return a + (b - a) * t;
+}
+
+function mixColor(a, b, t) {
+  return a.map((channel, index) => mixScalar(channel, b[index], t));
+}
+
+function colorToHex(color) {
+  return `#${color
+    .map((channel) => Math.round(channel).toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
+function updateThemeColor(baseSunUv) {
+  if (!themeColorMeta) {
+    return;
+  }
+
+  const dayAmount = smoothstepJs(0.14, 0.46, baseSunUv.y);
+  const nightAmount = 1 - smoothstepJs(-0.08, 0.1, baseSunUv.y);
+  const sunsetAmount = clamp01(1 - dayAmount - nightAmount * 0.55);
+  let themeColor = mixColor([8, 13, 26], [117, 176, 245], dayAmount);
+  themeColor = mixColor(themeColor, [250, 245, 237], sunsetAmount);
+  const nextValue = colorToHex(themeColor);
+
+  if (nextValue !== themeColorValue) {
+    themeColorMeta.content = nextValue;
+    themeColorValue = nextValue;
+  }
+}
 
 const canvas = document.querySelector(".hero-canvas");
 const renderer = new THREE.WebGLRenderer({
@@ -270,78 +313,7 @@ const material = new THREE.ShaderMaterial({
       density *= heightGradient * islandMask;
       density -= edgeErosion;
       density -= mix(0.45, 0.67, heightFrac);
-      float lowerDensity = max(density * 1.9, 0.0);
-
-      vec4 upperMacro = texture(uShapeNoise, fract((p + vec3(5.7, 1.3, 3.1)) * vec3(0.042, 0.018, 0.042) - wind * 0.12));
-      float upperMask = smoothstep(0.42, 0.72, upperMacro.r) * smoothstep(0.3, 0.74, upperMacro.g);
-      vec2 upperUv = p.xz * 0.19 - wind.xz * 0.14 + (upperMacro.ba - 0.5) * 0.28 + vec2(0.19, 0.41);
-      vec2 upperCell = fract(upperUv) - 0.5;
-      float upperEnvelope = 1.0 - smoothstep(0.24, 0.5, length(upperCell * vec2(0.92, 1.16)));
-      float upperIsland = clamp(upperMask * (0.52 + upperEnvelope * 0.48), 0.0, 1.0);
-
-      if (upperIsland <= 0.01) return lowerDensity;
-
-      float upperBottom = 1.15 + upperMacro.b * 0.95;
-      float upperTop = upperBottom + 1.6 + upperMacro.a * 1.95;
-      float upperFrac = clamp((p.y - upperBottom) / max(upperTop - upperBottom, 0.001), 0.0, 1.0);
-      float upperGradient = smoothstep(0.0, 0.08, upperFrac) * (1.0 - smoothstep(0.82, 1.0, upperFrac));
-
-      if (upperGradient <= 0.0) return lowerDensity;
-
-      vec3 upperPos = p + vec3(0.0, 0.12, 0.0);
-      upperPos.xz += warpA.xy * 0.16 + warpB.xy * 0.1;
-      vec4 upperShapeSet = sampleShapeSet(upperPos + vec3(3.1, 0.4, 2.2), wind * 0.9);
-      vec4 upperDetailSet = sampleDetailSet(upperPos + vec3(1.4, 0.3, 4.1), wind * 0.86);
-      float upperShape = sampleShape(upperShapeSet);
-      float upperDetail = sampleDetail(upperDetailSet);
-      float upperLobes = pow(upperShapeSet.g, 1.45) * 0.28 + pow(upperShapeSet.b, 1.8) * 0.22;
-      float upperWisps = pow(max(upperDetailSet.b - 0.42, 0.0), 1.8) * 0.2;
-      float upperDensity = upperShape * 1.04;
-      upperDensity += upperLobes + upperWisps;
-      upperDensity += upperIsland * 0.28;
-      upperDensity *= upperGradient * upperIsland;
-      upperDensity -= (1.0 - upperDetail) * 0.1;
-      upperDensity -= mix(0.36, 0.56, upperFrac);
-
-      vec4 topMacro = texture(uShapeNoise, fract((p + vec3(11.3, 4.7, 8.2)) * vec3(0.058, 0.024, 0.058) + wind * 0.08));
-      float topMask = smoothstep(0.46, 0.74, topMacro.r) * smoothstep(0.3, 0.72, topMacro.g);
-      float topBottom = 2.35 + topMacro.b * 0.95;
-      float topTop = topBottom + 1.45 + topMacro.a * 1.75;
-      float topFrac = clamp((p.y - topBottom) / max(topTop - topBottom, 0.001), 0.0, 1.0);
-      float topGradient = smoothstep(0.0, 0.06, topFrac) * (1.0 - smoothstep(0.9, 1.0, topFrac));
-      vec2 topUv = p.xz * 0.24 + (topMacro.ba - 0.5) * 0.22 + vec2(0.61, 0.27);
-      float topEnvelope = 1.0 - smoothstep(0.24, 0.54, length((fract(topUv) - 0.5) * vec2(1.0, 1.18)));
-      float topIsland = clamp(topMask * (0.46 + topEnvelope * 0.54), 0.0, 1.0);
-      vec4 topShapeSet = sampleShapeSet(p + vec3(8.4, 2.1, 1.8), wind * 0.74);
-      vec4 topDetailSet = sampleDetailSet(p + vec3(2.2, 1.6, 5.7), wind * 0.7);
-      float topDensity = sampleShape(topShapeSet) * 0.84;
-      topDensity += pow(topShapeSet.g, 1.6) * 0.2;
-      topDensity += pow(max(topDetailSet.b - 0.42, 0.0), 1.8) * 0.16;
-      topDensity += topIsland * 0.18;
-      topDensity *= topGradient * topIsland;
-      topDensity -= (1.0 - sampleDetail(topDetailSet)) * 0.09;
-      topDensity -= mix(0.4, 0.58, topFrac);
-
-      vec4 highMacro = texture(uShapeNoise, fract((p + vec3(17.2, 8.3, 12.1)) * vec3(0.074, 0.03, 0.074) - wind * 0.05));
-      float highMask = smoothstep(0.44, 0.7, highMacro.r) * smoothstep(0.3, 0.68, highMacro.g);
-      float highBottom = 3.95 + highMacro.b * 0.88;
-      float highTop = highBottom + 1.15 + highMacro.a * 1.45;
-      float highFrac = clamp((p.y - highBottom) / max(highTop - highBottom, 0.001), 0.0, 1.0);
-      float highGradient = smoothstep(0.0, 0.05, highFrac) * (1.0 - smoothstep(0.92, 1.0, highFrac));
-      vec2 highUv = p.xz * 0.29 + (highMacro.ba - 0.5) * 0.2 + vec2(0.13, 0.73);
-      float highEnvelope = 1.0 - smoothstep(0.24, 0.56, length((fract(highUv) - 0.5) * vec2(1.04, 1.22)));
-      float highIsland = clamp(highMask * (0.52 + highEnvelope * 0.48), 0.0, 1.0);
-      vec4 highShapeSet = sampleShapeSet(p + vec3(15.7, 4.4, 6.8), wind * 0.62);
-      vec4 highDetailSet = sampleDetailSet(p + vec3(4.8, 3.1, 9.6), wind * 0.6);
-      float highDensity = sampleShape(highShapeSet) * 0.74;
-      highDensity += pow(highShapeSet.g, 1.7) * 0.16;
-      highDensity += pow(max(highDetailSet.b - 0.43, 0.0), 1.7) * 0.12;
-      highDensity += highIsland * 0.16;
-      highDensity *= highGradient * highIsland;
-      highDensity -= (1.0 - sampleDetail(highDetailSet)) * 0.08;
-      highDensity -= mix(0.42, 0.58, highFrac);
-
-      return max(lowerDensity, max(max(upperDensity * 2.2, 0.0), max(max(topDensity * 1.95, 0.0), max(highDensity * 1.55, 0.0))));
+      return max(density * 1.9, 0.0);
     }
 
     vec2 uvToScene(vec2 uv) {
@@ -406,15 +378,9 @@ const material = new THREE.ShaderMaterial({
       float upperBackdrop = smoothstep(0.46, 0.74, backdropA.r) * smoothstep(0.12, 1.08, p.y);
       upperBackdrop *= 1.0 - smoothstep(0.86, 1.42, p.y);
       upperBackdrop *= 0.66 + smoothstep(0.44, 0.8, backdropA.g) * 0.34;
-      float upperBackdropDetail = smoothstep(0.46, 0.74, backdropB.b) * (1.0 - smoothstep(0.54, 0.82, backdropB.a));
-      float highBackdrop = smoothstep(0.48, 0.76, backdropB.r) * smoothstep(0.74, 1.52, p.y) * (1.0 - smoothstep(1.28, 1.86, p.y));
-      float edgeBackdropFade = smoothstep(0.24, 0.9, abs(sx)) * smoothstep(0.28, 1.02, p.y);
-      upperBackdrop *= 1.0 - edgeBackdropFade * 0.12;
-      upperBackdropDetail *= 1.0 - edgeBackdropFade * 0.46;
-      highBackdrop *= 1.0 - edgeBackdropFade * 0.72;
       vec3 backdropColor = mix(vec3(0.74, 0.79, 0.89), vec3(1.0, 0.88, 0.76), sunsetAmount + dayAmount * 0.22);
       backdropColor = mix(backdropColor, vec3(0.2, 0.25, 0.36), nightAmount * 0.7);
-      color = mix(color, backdropColor, upperBackdrop * 0.34 + upperBackdropDetail * upperBackdrop * 0.22 + highBackdrop * 0.18);
+      color = mix(color, backdropColor, upperBackdrop * 0.24);
       color += mix(vec3(0.14, 0.18, 0.28), vec3(1.0, 0.77, 0.46), sunsetAmount + dayAmount * 0.5) *
         exp(-1.05 * length((p - sunPos) * vec2(0.72, 1.04))) * mix(0.08, 0.3, 1.0 - nightAmount * 0.6);
 
@@ -642,15 +608,9 @@ const wordmarkMaterial = new THREE.ShaderMaterial({
       float upperBackdrop = smoothstep(0.46, 0.74, backdropA.r) * smoothstep(0.12, 1.08, p.y);
       upperBackdrop *= 1.0 - smoothstep(0.86, 1.42, p.y);
       upperBackdrop *= 0.66 + smoothstep(0.44, 0.8, backdropA.g) * 0.34;
-      float upperBackdropDetail = smoothstep(0.46, 0.74, backdropB.b) * (1.0 - smoothstep(0.54, 0.82, backdropB.a));
-      float highBackdrop = smoothstep(0.48, 0.76, backdropB.r) * smoothstep(0.74, 1.52, p.y) * (1.0 - smoothstep(1.28, 1.86, p.y));
-      float edgeBackdropFade = smoothstep(0.24, 0.9, abs(sx)) * smoothstep(0.28, 1.02, p.y);
-      upperBackdrop *= 1.0 - edgeBackdropFade * 0.12;
-      upperBackdropDetail *= 1.0 - edgeBackdropFade * 0.46;
-      highBackdrop *= 1.0 - edgeBackdropFade * 0.72;
       vec3 backdropColor = mix(vec3(0.74, 0.79, 0.89), vec3(1.0, 0.88, 0.76), sunsetAmount + dayAmount * 0.22);
       backdropColor = mix(backdropColor, vec3(0.2, 0.25, 0.36), nightAmount * 0.7);
-      color = mix(color, backdropColor, upperBackdrop * 0.34 + upperBackdropDetail * upperBackdrop * 0.22 + highBackdrop * 0.18);
+      color = mix(color, backdropColor, upperBackdrop * 0.24);
       color += mix(vec3(0.14, 0.18, 0.28), vec3(1.0, 0.77, 0.46), sunsetAmount + dayAmount * 0.5) *
         exp(-1.05 * length((p - sunPos) * vec2(0.72, 1.04))) * mix(0.08, 0.3, 1.0 - nightAmount * 0.6);
 
@@ -791,6 +751,7 @@ currentSun.copy(currentBaseSun);
 wordmarkMaterial.uniforms.uPointer.value.copy(currentPointer);
 wordmarkMaterial.uniforms.uSunBaseUv.value.copy(currentBaseSun);
 wordmarkMaterial.uniforms.uSunUv.value.copy(currentSun);
+updateThemeColor(currentBaseSun);
 renderWordmark();
 
 window.addEventListener("pointermove", (event) => {
@@ -844,6 +805,7 @@ function render() {
   wordmarkMaterial.uniforms.uPointer.value.copy(currentPointer);
   wordmarkMaterial.uniforms.uSunBaseUv.value.copy(currentBaseSun);
   wordmarkMaterial.uniforms.uSunUv.value.copy(currentSun);
+  updateThemeColor(currentBaseSun);
   renderer.render(scene, camera);
   renderWordmark();
   window.requestAnimationFrame(render);
