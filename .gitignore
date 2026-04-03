@@ -4,3 +4,5 @@
 .swiftpm/
 .env.local
 Cloudflare2.xcodeproj/
+www/node_modules/
+www/dist/

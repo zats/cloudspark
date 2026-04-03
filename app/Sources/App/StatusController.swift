@@ -10,14 +10,21 @@ final class StatusController: NSObject, NSMenuDelegate {
         case pageDeployments
     }
 
+    private struct RecentBuildChange {
+        let projectName: String
+        let status: String
+        let symbolName: String
+        let changedAt: Date
+    }
+
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
     private let workersPagesMenu = NSMenu()
     private let summaryItem = NSMenuItem(title: "Cloudflare", action: nil, keyEquivalent: "")
     private let workersPagesItem = NSMenuItem(title: "Workers", action: nil, keyEquivalent: "")
-    private let refreshItem = NSMenuItem(title: "Refresh", action: #selector(refreshBuilds), keyEquivalent: "r")
-    private let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
-    private let quitItem = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
+    private let refreshItem = NSMenuItem(title: "Refresh", action: #selector(refreshBuilds), keyEquivalent: "")
+    private let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: "")
+    private let quitItem = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "")
 
     private var projects: [DashboardProject] = []
     private var authenticator: DashboardAuthenticator?
@@ -40,6 +47,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     private var sessions: [DashboardSession] = []
     private var sessionTask: Task<DashboardSession, Error>?
     private var didRequestStartupLogin = false
+    private var recentBuildChangesByKey: [String: RecentBuildChange] = [:]
 
     func start() {
         sessions = (try? DashboardSessionStore.loadAll()) ?? []
@@ -56,6 +64,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     private func configureMenu() {
         statusItem.button?.image = NSImage(systemSymbolName: "cloud.fill", accessibilityDescription: AppBundle.name)
         statusItem.button?.imagePosition = .imageOnly
+        statusItem.button?.toolTip = nil
 
         summaryItem.isEnabled = false
         menu.addItem(summaryItem)
@@ -86,10 +95,44 @@ final class StatusController: NSObject, NSMenuDelegate {
         summaryItem.title = text
     }
 
-    private func setStatusCount(_ count: Int?) {
-        statusItem.button?.image = NSImage(systemSymbolName: "cloud.fill", accessibilityDescription: AppBundle.name)
+    private func updateStatusIcon() {
+        let activeRecentChanges = activeRecentBuildChanges()
+        statusItem.button?.image = NSImage(
+            systemSymbolName: statusIconSymbolName(activeRecentChanges: activeRecentChanges),
+            accessibilityDescription: AppBundle.name
+        )
         statusItem.button?.imagePosition = .imageOnly
         statusItem.button?.title = ""
+        statusItem.button?.toolTip = statusTooltip(activeRecentChanges: activeRecentChanges)
+    }
+
+    private func statusIconSymbolName(activeRecentChanges: [RecentBuildChange]) -> String {
+        guard let latestChange = activeRecentChanges.first else {
+            return "icloud.fill"
+        }
+        return latestChange.symbolName
+    }
+
+    private func statusTooltip(activeRecentChanges: [RecentBuildChange]) -> String? {
+        guard !activeRecentChanges.isEmpty else {
+            return nil
+        }
+        return activeRecentChanges
+            .map { "\($0.projectName): \($0.status)" }
+            .joined(separator: "\n")
+    }
+
+    private func activeRecentBuildChanges(referenceDate: Date = Date()) -> [RecentBuildChange] {
+        pruneRecentBuildChanges(referenceDate: referenceDate)
+        return recentBuildChangesByKey.values.sorted { lhs, rhs in
+            lhs.changedAt > rhs.changedAt
+        }
+    }
+
+    private func pruneRecentBuildChanges(referenceDate: Date) {
+        recentBuildChangesByKey = recentBuildChangesByKey.filter { _, change in
+            referenceDate.timeIntervalSince(change.changedAt) <= recentBuildChangeWindow
+        }
     }
 
     private func scheduleRefresh() {
@@ -145,8 +188,9 @@ final class StatusController: NSObject, NSMenuDelegate {
         hasLoadedPageDeployments = false
         lastRefreshedAt = nil
         highlightedWorkersPagesItem = nil
+        recentBuildChangesByKey = [:]
         rebuildWorkersPagesMenu()
-        setStatusCount(nil)
+        updateStatusIcon()
         updateSummary(sessions.isEmpty ? "Not logged in" : "Refreshing…")
     }
 
@@ -248,6 +292,7 @@ final class StatusController: NSObject, NSMenuDelegate {
                             }
                         }
                     }
+                    recordBuildChanges(from: previousBuilds, to: nextBuilds)
                     notifyAboutBuildChanges(from: previousBuilds, to: nextBuilds)
                     latestBuildsByID = nextBuilds
                     hasLoadedLatestBuilds = true
@@ -499,10 +544,11 @@ final class StatusController: NSObject, NSMenuDelegate {
             hasLoadedLatestBuilds = false
             hasLoadedWorkerMetrics = false
             hasLoadedPageDeployments = false
+            recentBuildChangesByKey = [:]
             rebuildWorkersPagesMenu()
             settingsController.refresh(sessions: sessions)
             syncMenuState()
-            setStatusCount(nil)
+            updateStatusIcon()
             updateSummary("Logged out")
             scheduleRefresh()
         } catch {
@@ -562,7 +608,7 @@ final class StatusController: NSObject, NSMenuDelegate {
 
     private func updateBuildSelectionAndSummary() {
         let running = latestBuildsByID.values.filter(\.isInProgress)
-        setStatusCount(running.isEmpty ? nil : running.count)
+        updateStatusIcon()
 
         if !running.isEmpty {
             updateSummary("\(running.count) active build(s)")
@@ -571,16 +617,16 @@ final class StatusController: NSObject, NSMenuDelegate {
         } else if projects.isEmpty {
             updateSummary("No projects found")
         } else if let lastRefreshedAt {
-            updateSummary("Refreshed \(relativeRefreshString(since: lastRefreshedAt))")
+            updateSummary("Refreshed: \(relativeRefreshString(since: lastRefreshedAt))")
         } else {
-            updateSummary("Refreshed just now")
+            updateSummary("Refreshed: now")
         }
     }
 
     private func relativeRefreshString(since date: Date) -> String {
         let seconds = max(0, Int(Date().timeIntervalSince(date)))
         if seconds < 5 {
-            return "just now"
+            return "now"
         }
         if seconds < 60 {
             return "\(seconds)s ago"
@@ -624,6 +670,27 @@ final class StatusController: NSObject, NSMenuDelegate {
         return build.status?.lowercased() ?? "unknown"
     }
 
+    private func recordBuildChanges(
+        from previousBuilds: [String: DashboardBuild],
+        to nextBuilds: [String: DashboardBuild]
+    ) {
+        let now = Date()
+        for (buildKey, build) in uniqueBuildEntries(nextBuilds) {
+            let previousBuild = previousBuilds[buildKey]
+            guard shouldNotify(for: build, previous: previousBuild) else {
+                continue
+            }
+            let status = displayStatus(for: build)
+            recentBuildChangesByKey[buildKey] = RecentBuildChange(
+                projectName: projectName(for: buildKey),
+                status: status,
+                symbolName: statusIconSymbolName(for: build),
+                changedAt: now
+            )
+        }
+        pruneRecentBuildChanges(referenceDate: now)
+    }
+
     private func notifyAboutBuildChanges(
         from previousBuilds: [String: DashboardBuild],
         to nextBuilds: [String: DashboardBuild]
@@ -632,13 +699,13 @@ final class StatusController: NSObject, NSMenuDelegate {
             return
         }
 
-        for (externalScriptID, build) in nextBuilds {
-            let previousBuild = previousBuilds[externalScriptID]
+        for (buildKey, build) in uniqueBuildEntries(nextBuilds) {
+            let previousBuild = previousBuilds[buildKey]
             guard shouldNotify(for: build, previous: previousBuild) else {
                 continue
             }
 
-            let projectName = overviewProjectsByID.values.first(where: { $0.buildID == externalScriptID })?.name ?? "Worker"
+            let projectName = projectName(for: buildKey)
             let status = displayStatus(for: build)
             let body = build.branch.map { "\(status) • \($0)" } ?? status
 
@@ -650,6 +717,32 @@ final class StatusController: NSObject, NSMenuDelegate {
                 BuildNotificationManager.notify(title: projectName, body: body)
             }
         }
+    }
+
+    private func uniqueBuildEntries(_ builds: [String: DashboardBuild]) -> [(String, DashboardBuild)] {
+        var seenBuildIDs = Set<String>()
+        var result: [(String, DashboardBuild)] = []
+        for (buildKey, build) in builds {
+            guard seenBuildIDs.insert(build.id).inserted else {
+                continue
+            }
+            result.append((buildKey, build))
+        }
+        return result
+    }
+
+    private func projectName(for buildKey: String) -> String {
+        overviewProjectsByID.values.first(where: { $0.buildID == buildKey })?.name ?? "Worker"
+    }
+
+    private func statusIconSymbolName(for build: DashboardBuild) -> String {
+        if build.isInProgress {
+            return "arrow.trianglehead.2.clockwise.rotate.90.icloud.fill"
+        }
+        if build.isFailed {
+            return "exclamationmark.icloud.fill"
+        }
+        return "icloud.fill"
     }
 
     private func shouldNotify(for build: DashboardBuild, previous: DashboardBuild?) -> Bool {
@@ -682,4 +775,5 @@ final class StatusController: NSObject, NSMenuDelegate {
         (item?.view as? WorkersPagesMenuItemView)?.refreshHighlight(isHighlighted: true)
         highlightedWorkersPagesItem = item
     }
+    private let recentBuildChangeWindow: TimeInterval = 3 * 60
 }
