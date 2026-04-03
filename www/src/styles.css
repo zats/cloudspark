@@ -64,7 +64,7 @@ body {
   justify-items: center;
   text-align: center;
   color: #ffffff;
-  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.26);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.16);
 }
 
 .eyebrow,
@@ -107,7 +107,7 @@ h1 {
   border-radius: 4px;
   background: #111111;
   color: #ffffff;
-  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.28);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
   text-decoration: none;
   font-size: 0.98rem;
   letter-spacing: -0.02em;
