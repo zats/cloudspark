@@ -268,9 +268,9 @@ const material = new THREE.ShaderMaterial({
       float top = mix(0.9, 1.85, smoothstep(0.4, 0.95, max(cellMask, towerMask)));
       top += clusterCore * 0.14;
       float cloudMid = (bottom + top) * 0.5;
-      float cloudHeight = (top - bottom) * 3.0;
-      bottom = cloudMid - cloudHeight / 3.0;
-      top = cloudMid + cloudHeight * (2.0 / 3.0);
+      float cloudHeight = (top - bottom) * 2.0;
+      bottom = cloudMid - cloudHeight * 0.5;
+      top = cloudMid + cloudHeight * 0.5;
       float heightFrac = clamp((p.y - bottom) / max(top - bottom, 0.001), 0.0, 1.0);
       float baseLift = smoothstep(0.0, 0.08, heightFrac);
       float crownFade = 1.0 - smoothstep(0.7, 1.0, heightFrac);
@@ -647,16 +647,21 @@ const wordmarkMaterial = new THREE.ShaderMaterial({
 wordmarkScene.add(new THREE.Mesh(geometry, wordmarkMaterial));
 
 function resize() {
-  const width = Math.ceil(window.innerWidth);
-  const height = Math.ceil(window.innerHeight);
+  const { width, height } = canvas.getBoundingClientRect();
+  const nextWidth = Math.max(1, Math.ceil(width));
+  const nextHeight = Math.max(1, Math.ceil(height));
 
-  renderer.setSize(width, height, true);
-  material.uniforms.uResolution.value.set(width, height);
-  wordmarkMaterial.uniforms.uResolution.value.set(width, height);
+  renderer.setSize(nextWidth, nextHeight, false);
+  material.uniforms.uResolution.value.set(nextWidth, nextHeight);
+  wordmarkMaterial.uniforms.uResolution.value.set(nextWidth, nextHeight);
 }
 
 resize();
 window.addEventListener("resize", resize);
+const canvasResizeObserver = new ResizeObserver(() => {
+  resize();
+});
+canvasResizeObserver.observe(canvas);
 
 const wordmarkResizeObserver = new ResizeObserver(() => {
   renderWordmark();

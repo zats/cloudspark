@@ -21,6 +21,7 @@ body {
   position: relative;
   min-height: 100vh;
   min-height: 100svh;
+  min-height: 100lvh;
   overflow: hidden;
   background:
     radial-gradient(circle at 68% 72%, rgba(255, 177, 94, 0.28), transparent 22%),
@@ -31,15 +32,24 @@ body {
 .hero-canvas,
 .hero-glow {
   position: fixed;
-  inset: 0;
+  left: 0;
+  right: 0;
+  top: calc(env(safe-area-inset-top, 0px) * -1);
+  height: calc(
+    100lvh + env(safe-area-inset-top, 0px) + env(safe-area-inset-bottom, 0px)
+  );
 }
 
 .hero-canvas {
   z-index: 0;
   width: 100vw;
-  height: 100vh;
+  height: calc(
+    100lvh + env(safe-area-inset-top, 0px) + env(safe-area-inset-bottom, 0px)
+  );
   min-width: 100vw;
-  min-height: 100vh;
+  min-height: calc(
+    100lvh + env(safe-area-inset-top, 0px) + env(safe-area-inset-bottom, 0px)
+  );
   display: block;
   pointer-events: none;
 }
@@ -57,10 +67,15 @@ body {
   z-index: 2;
   min-height: 100vh;
   min-height: 100svh;
+  min-height: 100lvh;
   display: grid;
   align-content: center;
   gap: 1rem;
-  padding: 32px;
+  padding:
+    max(32px, env(safe-area-inset-top, 0px))
+    max(32px, env(safe-area-inset-right, 0px))
+    max(32px, env(safe-area-inset-bottom, 0px))
+    max(32px, env(safe-area-inset-left, 0px));
   justify-items: center;
   text-align: center;
   color: #ffffff;
