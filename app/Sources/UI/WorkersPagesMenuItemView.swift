@@ -48,6 +48,7 @@ final class WorkersPagesMenuItemView: NSView {
         statusIconView.isHidden = (project.statusText?.isEmpty ?? true)
         statusIconView.image = statusImage(for: project.statusText)
         statusIconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
+        updateStatusSymbolEffect()
 
         requestsItem.update(text: project.metrics.map { formatCompactInt($0.requests) })
         errorsItem.update(text: project.metrics.map { formatCompactInt($0.errors) })
@@ -157,28 +158,38 @@ final class WorkersPagesMenuItemView: NSView {
     }
 
     private func statusImage(for status: String?) -> NSImage? {
-        let symbolName = switch status?.lowercased() {
-        case "queued", "initializing", "running", "building", "deploying":
-            "arrow.trianglehead.2.clockwise.rotate.90"
-        case "success":
+        let symbolName = switch DashboardStatusKind(status: status) {
+        case .inProgress:
+            "arrow.trianglehead.2.clockwise"
+        case .success:
             "checkmark.circle.fill"
-        case "failure", "failed", "error":
+        case .failure:
             "xmark.circle.fill"
-        default:
+        case .neutral:
             "circle.fill"
         }
         return NSImage(systemSymbolName: symbolName, accessibilityDescription: status)
     }
 
+    private func updateStatusSymbolEffect() {
+        if #available(macOS 14.0, *) {
+            statusIconView.removeAllSymbolEffects(animated: false)
+            guard project.statusKind == .inProgress else {
+                return
+            }
+            statusIconView.addSymbolEffect(.rotate.byLayer, options: .repeating, animated: false)
+        }
+    }
+
     private func statusColor(for status: String?) -> NSColor {
-        switch status?.lowercased() {
-        case "queued", "initializing", "running", "building", "deploying":
+        switch DashboardStatusKind(status: status) {
+        case .inProgress:
             return NSColor.systemOrange.blended(withFraction: 0.15, of: .labelColor) ?? .systemOrange
-        case "success":
+        case .success:
             return NSColor.systemGreen.blended(withFraction: 0.15, of: .labelColor) ?? .systemGreen
-        case "failure", "failed", "error":
+        case .failure:
             return NSColor.systemRed.blended(withFraction: 0.15, of: .labelColor) ?? .systemRed
-        default:
+        case .neutral:
             return .secondaryLabelColor
         }
     }

@@ -1,5 +1,55 @@
 import Foundation
 
+enum DashboardStatusKind {
+    case inProgress
+    case success
+    case failure
+    case neutral
+
+    private static let inProgressValues: Set<String> = [
+        "queued",
+        "initializing",
+        "running",
+        "building",
+        "deploying",
+    ]
+
+    private static let successValues: Set<String> = [
+        "success",
+        "successful",
+        "succeeded",
+        "deployed",
+        "complete",
+        "completed",
+    ]
+
+    private static let failureValues: Set<String> = [
+        "failed",
+        "failure",
+        "errored",
+        "error",
+        "canceled",
+        "cancelled",
+    ]
+
+    init(status: String?) {
+        let normalized = status?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let normalized, Self.inProgressValues.contains(normalized) {
+            self = .inProgress
+            return
+        }
+        if let normalized, Self.successValues.contains(normalized) {
+            self = .success
+            return
+        }
+        if let normalized, Self.failureValues.contains(normalized) {
+            self = .failure
+            return
+        }
+        self = .neutral
+    }
+}
+
 struct DashboardSession: Codable {
     let capturedAt: Date
     let xAtok: String
@@ -74,29 +124,24 @@ struct DashboardBuild: Encodable {
     let createdOn: String?
     let versionIDs: [String]
 
+    var statusKind: DashboardStatusKind {
+        DashboardStatusKind(status: status)
+    }
+
+    var outcomeKind: DashboardStatusKind {
+        DashboardStatusKind(status: buildOutcome)
+    }
+
     var isInProgress: Bool {
-        guard let status else { return false }
-        return ["queued", "initializing", "running"].contains(status.lowercased())
+        statusKind == .inProgress
     }
 
     var isSuccessful: Bool {
-        if let outcome = buildOutcome?.lowercased(), ["success", "successful", "succeeded"].contains(outcome) {
-            return true
-        }
-        if let status = status?.lowercased(), ["success", "successful", "succeeded", "deployed", "complete", "completed"].contains(status) {
-            return true
-        }
-        return false
+        outcomeKind == .success || statusKind == .success
     }
 
     var isFailed: Bool {
-        if let outcome = buildOutcome?.lowercased(), ["failed", "failure", "errored", "error", "canceled", "cancelled"].contains(outcome) {
-            return true
-        }
-        if let status = status?.lowercased(), ["failed", "failure", "errored", "error", "canceled", "cancelled"].contains(status) {
-            return true
-        }
-        return false
+        outcomeKind == .failure || statusKind == .failure
     }
 }
 
@@ -131,6 +176,10 @@ struct DashboardProject {
 
     var statusText: String? {
         latestStatus
+    }
+
+    var statusKind: DashboardStatusKind {
+        DashboardStatusKind(status: latestStatus)
     }
 
     var id: String {

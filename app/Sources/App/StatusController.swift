@@ -3,6 +3,8 @@ import Foundation
 
 @MainActor
 final class StatusController: NSObject, NSMenuDelegate {
+    private static let inProgressStatusImageName = NSImage.Name("BuildInProgress")
+
     private enum Endpoint: CaseIterable, Hashable {
         case overview
         case latestBuilds
@@ -21,10 +23,21 @@ final class StatusController: NSObject, NSMenuDelegate {
     private let menu = NSMenu()
     private let workersPagesMenu = NSMenu()
     private let summaryItem = NSMenuItem(title: "Cloudflare", action: nil, keyEquivalent: "")
+    private let summarySectionSeparatorItem = NSMenuItem.separator()
     private let workersPagesItem = NSMenuItem(title: "Workers", action: nil, keyEquivalent: "")
     private let refreshItem = NSMenuItem(title: "Refresh", action: #selector(refreshBuilds), keyEquivalent: "")
     private let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: "")
     private let quitItem = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "")
+    private let fractionalDateFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    private let plainDateFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
 
     private var projects: [DashboardProject] = []
     private var authenticator: DashboardAuthenticator?
@@ -33,6 +46,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     private var endpointTasks: [Endpoint: Task<Void, Never>] = [:]
     private var summaryTimer: Timer?
     private weak var highlightedWorkersPagesItem: NSMenuItem?
+    private weak var highlightedRecentBuildItem: NSMenuItem?
 
     private var overviewProjectsByID: [String: DashboardProject] = [:]
     private var latestBuildsByID: [String: DashboardBuild] = [:]
@@ -48,6 +62,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     private var sessionTask: Task<DashboardSession, Error>?
     private var didRequestStartupLogin = false
     private var recentBuildChangesByKey: [String: RecentBuildChange] = [:]
+    private var recentBuildMenuItems: [NSMenuItem] = []
 
     func start() {
         sessions = (try? DashboardSessionStore.loadAll()) ?? []
@@ -68,7 +83,8 @@ final class StatusController: NSObject, NSMenuDelegate {
 
         summaryItem.isEnabled = false
         menu.addItem(summaryItem)
-        menu.addItem(NSMenuItem.separator())
+        menu.addItem(summarySectionSeparatorItem)
+        menu.delegate = self
 
         workersPagesItem.submenu = workersPagesMenu
         workersPagesMenu.delegate = self
@@ -93,24 +109,27 @@ final class StatusController: NSObject, NSMenuDelegate {
 
     private func updateSummary(_ text: String) {
         summaryItem.title = text
+        rebuildRecentBuildsMenu()
     }
 
     private func updateStatusIcon() {
         let activeRecentChanges = activeRecentBuildChanges()
-        statusItem.button?.image = NSImage(
-            systemSymbolName: statusIconSymbolName(activeRecentChanges: activeRecentChanges),
-            accessibilityDescription: AppBundle.name
-        )
+        statusItem.button?.image = statusIconImage(activeRecentChanges: activeRecentChanges)
         statusItem.button?.imagePosition = .imageOnly
         statusItem.button?.title = ""
         statusItem.button?.toolTip = statusTooltip(activeRecentChanges: activeRecentChanges)
     }
 
-    private func statusIconSymbolName(activeRecentChanges: [RecentBuildChange]) -> String {
+    private func statusIconImage(activeRecentChanges: [RecentBuildChange]) -> NSImage? {
         guard let latestChange = activeRecentChanges.first else {
-            return "icloud.fill"
+            return NSImage(systemSymbolName: "icloud.fill", accessibilityDescription: AppBundle.name)
         }
-        return latestChange.symbolName
+        if latestChange.symbolName == Self.inProgressStatusImageName {
+            let image = NSImage(named: Self.inProgressStatusImageName)!
+            image.isTemplate = true
+            return image
+        }
+        return NSImage(systemSymbolName: latestChange.symbolName, accessibilityDescription: AppBundle.name)
     }
 
     private func statusTooltip(activeRecentChanges: [RecentBuildChange]) -> String? {
@@ -668,6 +687,81 @@ final class StatusController: NSObject, NSMenuDelegate {
         }
     }
 
+    private func rebuildRecentBuildsMenu(referenceDate: Date = Date()) {
+        for item in recentBuildMenuItems {
+            menu.removeItem(item)
+        }
+        recentBuildMenuItems.removeAll()
+        highlightedRecentBuildItem = nil
+
+        let items = recentBuildMenuEntries(referenceDate: referenceDate).map { entry in
+            let item = NSMenuItem(title: entry.project.name, action: nil, keyEquivalent: "")
+            item.view = WorkersPagesMenuItemView(project: entry.project)
+            return item
+        }
+
+        for (offset, item) in items.enumerated() {
+            menu.insertItem(item, at: 1 + offset)
+        }
+        recentBuildMenuItems = items
+    }
+
+    private func recentBuildMenuEntries(referenceDate: Date) -> [(project: DashboardProject, build: DashboardBuild)] {
+        uniqueBuildEntries(latestBuildsByID)
+            .compactMap { buildKey, build in
+                guard shouldShowInRecentBuildsMenu(build, referenceDate: referenceDate) else {
+                    return nil
+                }
+                return (project: recentBuildProject(for: buildKey, build: build), build: build)
+            }
+            .sorted { lhs, rhs in
+                if lhs.build.isInProgress != rhs.build.isInProgress {
+                    return lhs.build.isInProgress && !rhs.build.isInProgress
+                }
+                return (buildCreatedAt(lhs.build) ?? .distantPast) > (buildCreatedAt(rhs.build) ?? .distantPast)
+            }
+    }
+
+    private func recentBuildProject(for buildKey: String, build: DashboardBuild) -> DashboardProject {
+        let accountID = buildKey.split(separator: ":", maxSplits: 1).first.map(String.init) ?? ""
+        return DashboardProject(
+            accountID: accountID,
+            accountEmail: accountEmail(for: accountID),
+            kind: .worker,
+            name: projectName(for: buildKey, build: build),
+            subtitle: build.branch,
+            externalScriptID: nil,
+            latestStatus: displayStatus(for: build),
+            latestBranch: build.branch,
+            lastReleaseAt: buildCreatedAt(build),
+            metrics: nil
+        )
+    }
+
+    private func shouldShowInRecentBuildsMenu(_ build: DashboardBuild, referenceDate: Date) -> Bool {
+        if build.isInProgress {
+            return true
+        }
+        guard let createdAt = buildCreatedAt(build) else {
+            return false
+        }
+        return referenceDate.timeIntervalSince(createdAt) <= recentBuildMenuWindow
+    }
+
+    private func buildCreatedAt(_ build: DashboardBuild) -> Date? {
+        guard let createdOn = build.createdOn else {
+            return nil
+        }
+        return parseDate(createdOn)
+    }
+
+    private func parseDate(_ value: String) -> Date? {
+        if let date = fractionalDateFormatter.date(from: value) {
+            return date
+        }
+        return plainDateFormatter.date(from: value)
+    }
+
     private func displayStatus(for build: DashboardBuild) -> String {
         if build.isInProgress {
             return build.status?.lowercased() ?? "running"
@@ -747,9 +841,26 @@ final class StatusController: NSObject, NSMenuDelegate {
         overviewProjectsByID.values.first(where: { $0.buildID == buildKey })?.name ?? "Worker"
     }
 
+    private func projectName(for buildKey: String, build: DashboardBuild) -> String {
+        if let project = overviewProjectsByID.values.first(where: { project in
+            guard project.kind == .worker else {
+                return false
+            }
+            if project.buildID == buildKey {
+                return true
+            }
+            return build.versionIDs.contains { versionID in
+                project.buildID == "\(project.accountID):\(versionID)" || project.externalScriptID == versionID
+            }
+        }) {
+            return project.name
+        }
+        return projectName(for: buildKey)
+    }
+
     private func statusIconSymbolName(for build: DashboardBuild) -> String {
         if build.isInProgress {
-            return "arrow.trianglehead.2.clockwise.rotate.90.icloud.fill"
+            return Self.inProgressStatusImageName
         }
         if build.isFailed {
             return "exclamationmark.icloud.fill"
@@ -780,15 +891,26 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
 
     func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {
-        guard menu === workersPagesMenu else {
+        if menu === workersPagesMenu {
+            if highlightedWorkersPagesItem === item {
+                return
+            }
+            (highlightedWorkersPagesItem?.view as? WorkersPagesMenuItemView)?.refreshHighlight(isHighlighted: false)
+            (item?.view as? WorkersPagesMenuItemView)?.refreshHighlight(isHighlighted: true)
+            highlightedWorkersPagesItem = item
             return
         }
-        if highlightedWorkersPagesItem === item {
+        guard menu === self.menu else {
             return
         }
-        (highlightedWorkersPagesItem?.view as? WorkersPagesMenuItemView)?.refreshHighlight(isHighlighted: false)
-        (item?.view as? WorkersPagesMenuItemView)?.refreshHighlight(isHighlighted: true)
-        highlightedWorkersPagesItem = item
+        let nextItem = recentBuildMenuItems.contains { $0 === item } ? item : nil
+        if highlightedRecentBuildItem === nextItem {
+            return
+        }
+        (highlightedRecentBuildItem?.view as? WorkersPagesMenuItemView)?.refreshHighlight(isHighlighted: false)
+        (nextItem?.view as? WorkersPagesMenuItemView)?.refreshHighlight(isHighlighted: true)
+        highlightedRecentBuildItem = nextItem
     }
     private let recentBuildChangeWindow: TimeInterval = 3 * 60
+    private let recentBuildMenuWindow: TimeInterval = 5 * 60
 }
