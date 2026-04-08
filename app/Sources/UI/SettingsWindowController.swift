@@ -96,12 +96,14 @@ final class SettingsWindowController: NSWindowController {
     }
 }
 
+private let tabIconSize: CGFloat = 20
+
 @MainActor
 private final class SettingsTabsViewController: NSTabViewController {
     let generalViewController = GeneralSettingsViewController()
     let accountsViewController = AccountsSettingsViewController()
     var onSelectTab: ((SettingsWindowController.Tab) -> Void)?
-    private let tabIconConfiguration = NSImage.SymbolConfiguration(pointSize: 20, weight: .regular)
+    private let tabIconConfiguration = NSImage.SymbolConfiguration(pointSize: tabIconSize, weight: .regular)
 
     var onLogin: (() -> Void)? {
         didSet { accountsViewController.onLogin = onLogin }
@@ -169,7 +171,7 @@ private final class SettingsTabsViewController: NSTabViewController {
             accessibilityDescription: nil
         )?.withSymbolConfiguration(tabIconConfiguration)
         image?.isTemplate = true
-        image?.size = NSSize(width: 20, height: 20)
+        image?.size = NSSize(width: tabIconSize, height: tabIconSize)
         return image
     }
 }
