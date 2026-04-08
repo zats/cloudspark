@@ -14,6 +14,7 @@ REMOTE="origin"
 OUTPUT_DIR=""
 DRAFT_RELEASE=0
 ALLOW_PROVISIONING_UPDATES=0
+DRY_RUN=0
 IGNORED_STATUS_PATHS=(
   "app/Cloudspark.xcodeproj/project.xcworkspace/xcuserdata/zats.xcuserdatad/UserInterfaceState.xcuserstate"
   "app/Cloudspark.xcodeproj/xcuserdata/zats.xcuserdatad/xcschemes/xcschememanagement.plist"
@@ -30,6 +31,7 @@ Options:
   --repo OWNER/NAME             GitHub repo. Default: GITHUB_REPOSITORY or gh repo.
   --remote NAME                 Git remote to push. Default: origin.
   --draft                       Create the GitHub release as a draft.
+  --dry-run                     Build/notarize locally but skip git/release/appcast changes.
   --allow-provisioning-updates  Pass through to xcodebuild archive.
   -h, --help                    Show help.
 
@@ -39,6 +41,10 @@ This script:
   3. Regenerates the Xcode project, commits, and pushes the branch.
   4. Builds and notarizes the direct-distribution zip.
   5. Tags the release and creates the GitHub release.
+
+With --dry-run:
+  - Uses the same computed next version for the build.
+  - Skips project file edits, commits, pushes, tags, GitHub release, and appcast.
 EOF
 }
 
@@ -148,6 +154,10 @@ while [[ $# -gt 0 ]]; do
       DRAFT_RELEASE=1
       shift
       ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
     --allow-provisioning-updates)
       ALLOW_PROVISIONING_UPDATES=1
       shift
@@ -168,11 +178,13 @@ NOTARY_PROFILE="${NOTARY_PROFILE:-${APPLE_NOTARY_PROFILE:-}}"
 REPO="${REPO:-${GITHUB_REPOSITORY:-}}"
 
 require_command git
-require_command gh
 require_command ruby
 require_command trash
 require_command xcodegen
 require_command python3
+if [[ "$DRY_RUN" -eq 0 ]]; then
+  require_command gh
+fi
 
 if [[ -z "$NOTARY_PROFILE" ]]; then
   echo "--notary-profile is required. Set it or export APPLE_NOTARY_PROFILE." >&2
@@ -189,7 +201,7 @@ if [[ ! -x "$RELEASE_HELPER_PATH" ]]; then
   exit 1
 fi
 
-if [[ ! -x "$APPCAST_HELPER_PATH" ]]; then
+if [[ "$DRY_RUN" -eq 0 && ! -x "$APPCAST_HELPER_PATH" ]]; then
   echo "Missing appcast helper: $APPCAST_HELPER_PATH" >&2
   exit 1
 fi
@@ -202,15 +214,18 @@ fi
 
 ensure_clean_worktree
 
-if [[ -z "$REPO" ]]; then
+if [[ "$DRY_RUN" -eq 0 && -z "$REPO" ]]; then
   REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
 fi
 
 git fetch "$REMOTE" --tags
 BASE_COMMIT="$(git rev-parse HEAD)"
-LAST_TAG="$(gh release list --repo "$REPO" --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName')"
-if [[ "$LAST_TAG" == "null" ]]; then
-  LAST_TAG=""
+LAST_TAG="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+if [[ "$DRY_RUN" -eq 0 ]]; then
+  LAST_TAG="$(gh release list --repo "$REPO" --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName')"
+  if [[ "$LAST_TAG" == "null" ]]; then
+    LAST_TAG=""
+  fi
 fi
 
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cloudspark-release.XXXXXX")"
@@ -253,7 +268,7 @@ if git rev-parse "$TAG^{tag}" >/dev/null 2>&1 || git ls-remote --exit-code --tag
   exit 1
 fi
 
-if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+if [[ "$DRY_RUN" -eq 0 ]] && gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
   echo "GitHub release already exists: $TAG" >&2
   exit 1
 fi
@@ -272,6 +287,16 @@ if [[ "$ALLOW_PROVISIONING_UPDATES" -eq 1 ]]; then
   HELPER_ARGS+=( --allow-provisioning-updates )
 fi
 "$RELEASE_HELPER_PATH" "${HELPER_ARGS[@]}"
+
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  echo
+  echo "Dry run complete"
+  echo "Version: $VERSION"
+  echo "Tag: $TAG"
+  echo "Artifact: $RELEASE_OUTPUT_DIR/$ASSET_NAME"
+  echo "Notes: $NOTES_FILE"
+  exit 0
+fi
 
 echo "Writing release version to project files"
 update_project_spec_versions "$NEXT_MARKETING_VERSION" "$NEXT_BUILD_NUMBER"
