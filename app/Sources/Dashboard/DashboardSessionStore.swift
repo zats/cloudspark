@@ -49,26 +49,6 @@ enum DashboardSessionStore {
         try requireSuccessOrNotFound(SecItemDelete(query as CFDictionary), operation: "clear-one")
     }
 
-    static func smokeTest() throws {
-        let sample = DashboardSession(
-            capturedAt: Date(),
-            xAtok: "smoke-\(UUID().uuidString)",
-            cookies: [],
-            accountID: nil,
-            workerName: nil,
-            userEmail: "smoke@example.com",
-            userDisplayName: "Smoke Test",
-            userAvatarURL: nil
-        )
-
-        try save(sample)
-        let loaded = try loadAll()
-        guard loaded.contains(where: { $0.storageKey == sample.storageKey }) else {
-            throw DashboardError.loginFailed("Keychain smoke test failed at verify")
-        }
-        try clear(storageKey: sample.storageKey)
-    }
-
     private static func deduplicate(_ sessions: [DashboardSession]) -> [DashboardSession] {
         var unique: [String: DashboardSession] = [:]
         for session in sessions {
