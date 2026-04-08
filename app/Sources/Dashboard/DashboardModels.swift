@@ -24,6 +24,7 @@ enum DashboardStatusKind: Equatable {
     ]
 
     private static let failureValues: Set<String> = [
+        "fail",
         "failed",
         "failure",
         "errored",
