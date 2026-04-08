@@ -27,7 +27,7 @@ final class StatusController: NSObject, NSMenuDelegate {
         let id: String
         let project: DashboardProject
         let isInProgress: Bool
-        let createdAt: Date?
+        let changedAt: Date?
     }
 
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -729,59 +729,81 @@ final class StatusController: NSObject, NSMenuDelegate {
     private func recentBuildMenuEntries(referenceDate: Date) -> [RecentBuildMenuEntry] {
         var entriesByID: [String: RecentBuildMenuEntry] = [:]
 
-        for entry in currentInProgressRecentBuildMenuEntries() {
+        for entry in currentRecentBuildMenuEntries(referenceDate: referenceDate) {
             entriesByID[entry.id] = entry
         }
 
         for change in activeRecentBuildChanges(referenceDate: referenceDate) {
-            if entriesByID[change.id] != nil {
+            if let existingEntry = entriesByID[change.id] {
+                entriesByID[change.id] = RecentBuildMenuEntry(
+                    id: change.id,
+                    project: change.project,
+                    isInProgress: existingEntry.isInProgress || change.isInProgress,
+                    changedAt: max(existingEntry.changedAt ?? .distantPast, change.changedAt)
+                )
                 continue
             }
             entriesByID[change.id] = RecentBuildMenuEntry(
                 id: change.id,
                 project: change.project,
                 isInProgress: change.isInProgress,
-                createdAt: change.changedAt
+                changedAt: change.changedAt
             )
         }
 
         return entriesByID.values
             .sorted { lhs, rhs in
-                if lhs.isInProgress != rhs.isInProgress {
-                    return lhs.isInProgress && !rhs.isInProgress
-                }
-                return (lhs.createdAt ?? .distantPast) > (rhs.createdAt ?? .distantPast)
+                (lhs.changedAt ?? .distantPast) > (rhs.changedAt ?? .distantPast)
             }
     }
 
-    private func currentInProgressRecentBuildMenuEntries() -> [RecentBuildMenuEntry] {
+    private func currentRecentBuildMenuEntries(referenceDate: Date) -> [RecentBuildMenuEntry] {
         var entries: [RecentBuildMenuEntry] = []
 
-        for (buildKey, build) in uniqueBuildEntries(latestBuildsByID) where build.isInProgress {
+        for (buildKey, build) in uniqueBuildEntries(latestBuildsByID) {
+            let statusKind = buildStatusKind(for: build)
+            guard statusKind == .inProgress
+                || ((statusKind == .success || statusKind == .failure)
+                    && isWithinRecentBuildWindow(buildCreatedAt(build), referenceDate: referenceDate))
+            else {
+                continue
+            }
             entries.append(
                 RecentBuildMenuEntry(
-                    id: buildKey,
+                    id: build.id,
                     project: recentBuildProject(for: buildKey, build: build),
-                    isInProgress: true,
-                    createdAt: buildCreatedAt(build)
+                    isInProgress: statusKind == .inProgress,
+                    changedAt: buildCreatedAt(build)
                 )
             )
         }
 
-        for (projectID, deployment) in pageDeploymentsByID
-            where DashboardStatusKind(status: deployment.latestStatus) == .inProgress
-        {
+        for (projectID, deployment) in pageDeploymentsByID {
+            let statusKind = DashboardStatusKind(status: deployment.latestStatus)
+            guard statusKind == .inProgress
+                || ((statusKind == .success || statusKind == .failure)
+                    && isWithinRecentBuildWindow(deployment.lastReleaseAt, referenceDate: referenceDate))
+            else {
+                continue
+            }
             entries.append(
                 RecentBuildMenuEntry(
-                    id: projectID,
+                    id: recentDeploymentKey(projectID: projectID, deployment: deployment),
                     project: recentPageProject(for: projectID, deployment: deployment),
-                    isInProgress: true,
-                    createdAt: deployment.lastReleaseAt
+                    isInProgress: statusKind == .inProgress,
+                    changedAt: deployment.lastReleaseAt
                 )
             )
         }
 
         return entries
+    }
+
+    private func isWithinRecentBuildWindow(_ date: Date?, referenceDate: Date) -> Bool {
+        guard let date else {
+            return false
+        }
+        return referenceDate.timeIntervalSince(date) <= recentBuildChangeWindow
     }
 
     private func applyWorkersPagesPlaceholder(title: String) {
@@ -980,8 +1002,8 @@ final class StatusController: NSObject, NSMenuDelegate {
             }
             let status = displayStatus(for: build)
             let project = recentBuildProject(for: buildKey, build: build)
-            recentBuildChangesByKey[buildKey] = RecentBuildChange(
-                id: buildKey,
+            recentBuildChangesByKey[build.id] = RecentBuildChange(
+                id: build.id,
                 project: project,
                 projectName: projectName(for: buildKey),
                 status: status,
@@ -1007,8 +1029,9 @@ final class StatusController: NSObject, NSMenuDelegate {
             }
             let status = deployment.latestStatus?.lowercased() ?? "unknown"
             let statusKind = DashboardStatusKind(status: deployment.latestStatus)
-            recentBuildChangesByKey[projectID] = RecentBuildChange(
-                id: projectID,
+            let changeID = recentDeploymentKey(projectID: projectID, deployment: deployment)
+            recentBuildChangesByKey[changeID] = RecentBuildChange(
+                id: changeID,
                 project: recentPageProject(for: projectID, deployment: deployment),
                 projectName: projectName(forPageProjectID: projectID),
                 status: status,
@@ -1110,6 +1133,14 @@ final class StatusController: NSObject, NSMenuDelegate {
             return project.name
         }
         return projectName(for: buildKey)
+    }
+
+    private func recentDeploymentKey(projectID: String, deployment: DashboardPageDeployment) -> String {
+        if let id = deployment.id, !id.isEmpty {
+            return id
+        }
+        let timestamp = deployment.lastReleaseAt?.timeIntervalSince1970 ?? 0
+        return "\(projectID):\(timestamp):\(deployment.latestStatus ?? "unknown")"
     }
 
     private func statusIconSymbolName(for build: DashboardBuild) -> String {

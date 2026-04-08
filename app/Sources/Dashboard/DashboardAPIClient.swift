@@ -334,6 +334,7 @@ final class DashboardAPIClient {
         let trigger = latestDeployment?["deployment_trigger"] as? [String: Any]
         let metadata = trigger?["metadata"] as? [String: Any]
         return DashboardPageDeployment(
+            id: latestDeployment?["id"] as? String,
             latestStatus: latestStage?["status"] as? String,
             latestBranch: metadata?["branch"] as? String,
             lastReleaseAt: parseDate(

@@ -17,6 +17,13 @@ enum DashboardDemoMode {
         }
         return name.replacingOccurrences(of: "lorica", with: "mythos")
     }
+
+    static func displayEmail(_ email: String?) -> String? {
+        guard let email, isEnabled else {
+            return email
+        }
+        return email.replacingOccurrences(of: "@getlorica.com", with: "@acme.com")
+    }
 }
 
 enum DashboardStatusKind: Equatable {
@@ -172,6 +179,7 @@ struct DashboardProjectMetrics: Equatable {
 }
 
 struct DashboardPageDeployment: Equatable {
+    let id: String?
     let latestStatus: String?
     let latestBranch: String?
     let lastReleaseAt: Date?
@@ -201,6 +209,10 @@ struct DashboardProject: Equatable {
 
     var displayName: String {
         DashboardDemoMode.displayProjectName(name)
+    }
+
+    var displayAccountEmail: String? {
+        DashboardDemoMode.displayEmail(accountEmail)
     }
 
     var statusKind: DashboardStatusKind {

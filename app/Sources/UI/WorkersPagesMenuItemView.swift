@@ -15,6 +15,7 @@ final class WorkersPagesMenuItemView: NSView {
     private let releaseItem = MetricItemView(symbolName: "clock")
     private var project: DashboardProject
     private var onClick: (() -> Void)?
+    private var handledClickInCurrentGesture = false
     private var isPointerHovering = false
     private var trackingArea: NSTrackingArea?
     private let rowWidth: CGFloat = 360
@@ -59,8 +60,8 @@ final class WorkersPagesMenuItemView: NSView {
         errorsItem.update(text: project.metrics.map { formatCompactInt($0.errors) })
         cpuItem.update(text: project.metrics.map { formatCPUTime($0.averageCPUTimeMS) })
         releaseItem.update(text: project.lastReleaseAt.map(formatRelativeDate))
-        accountLabel.stringValue = project.accountEmail ?? ""
-        accountLabel.isHidden = (project.accountEmail?.isEmpty ?? true)
+        accountLabel.stringValue = project.displayAccountEmail ?? ""
+        accountLabel.isHidden = (project.displayAccountEmail?.isEmpty ?? true)
 
         let hasVisibleMetrics = [requestsItem, errorsItem, cpuItem, releaseItem].contains { !$0.isHidden }
         metricsStack.isHidden = !hasVisibleMetrics
@@ -173,7 +174,28 @@ final class WorkersPagesMenuItemView: NSView {
         super.mouseExited(with: event)
     }
 
+    override func mouseDown(with event: NSEvent) {
+        guard let onClick else {
+            handledClickInCurrentGesture = false
+            super.mouseDown(with: event)
+            return
+        }
+        let point = convert(event.locationInWindow, from: nil)
+        guard bounds.contains(point) else {
+            handledClickInCurrentGesture = false
+            super.mouseDown(with: event)
+            return
+        }
+        handledClickInCurrentGesture = true
+        enclosingMenuItem?.menu?.cancelTracking()
+        onClick()
+    }
+
     override func mouseUp(with event: NSEvent) {
+        if handledClickInCurrentGesture {
+            handledClickInCurrentGesture = false
+            return
+        }
         guard let onClick else {
             super.mouseUp(with: event)
             return
@@ -233,7 +255,7 @@ final class WorkersPagesMenuItemView: NSView {
             guard project.statusKind == .inProgress else {
                 return
             }
-            statusIconView.addSymbolEffect(.rotate.byLayer, options: .repeating)
+            statusIconView.addSymbolEffect(.rotate.byLayer, options: .repeat(.continuous))
         }
     }
 
