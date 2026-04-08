@@ -3,7 +3,6 @@ import Security
 
 enum DashboardSessionStore {
     private static let service = "\(AppBundle.bundleID).dashboard.v2"
-    private static let accessGroup = currentAccessGroup()
 
     static func load() throws -> DashboardSession? {
         try loadAll().first
@@ -28,7 +27,7 @@ enum DashboardSessionStore {
             kSecAttrAccount: session.storageKey,
             kSecAttrAccessible: kSecAttrAccessibleWhenUnlocked,
             kSecValueData: data,
-        ].mergingAccessGroup(accessGroup)
+        ]
 
         let status = SecItemAdd(query as CFDictionary, nil)
         guard status == errSecSuccess else {
@@ -41,7 +40,7 @@ enum DashboardSessionStore {
             kSecClass: kSecClassGenericPassword,
             kSecUseDataProtectionKeychain: true,
             kSecAttrService: service,
-        ].mergingAccessGroup(accessGroup)
+        ]
 
         let status = SecItemDelete(query as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
@@ -55,7 +54,7 @@ enum DashboardSessionStore {
             kSecUseDataProtectionKeychain: true,
             kSecAttrService: service,
             kSecAttrAccount: storageKey,
-        ].mergingAccessGroup(accessGroup)
+        ]
 
         let status = SecItemDelete(query as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
@@ -81,7 +80,7 @@ enum DashboardSessionStore {
             kSecAttrService: service,
             kSecReturnData: true,
             kSecMatchLimit: kSecMatchLimitAll,
-        ].mergingAccessGroup(accessGroup)
+        ]
 
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
@@ -101,26 +100,6 @@ enum DashboardSessionStore {
         default:
             throw DashboardError.keychain(status)
         }
-    }
-
-    private static func currentAccessGroup() -> String? {
-        guard let task = SecTaskCreateFromSelf(nil),
-              let value = SecTaskCopyValueForEntitlement(task, "keychain-access-groups" as CFString, nil) as? [String],
-              let first = value.first,
-              !first.isEmpty
-        else {
-            return nil
-        }
-        return first
-    }
-}
-
-private extension Dictionary where Key == CFString, Value == Any {
-    func mergingAccessGroup(_ accessGroup: String?) -> [CFString: Any] {
-        guard let accessGroup, !accessGroup.isEmpty else { return self }
-        var result = self
-        result[kSecAttrAccessGroup] = accessGroup
-        return result
     }
 }
 
