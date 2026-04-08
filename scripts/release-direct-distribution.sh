@@ -18,6 +18,7 @@ TAG=""
 TITLE=""
 MARKETING_VERSION_OVERRIDE=""
 BUILD_NUMBER_OVERRIDE=""
+NOTARY_SUBMIT_ATTEMPTS="${NOTARY_SUBMIT_ATTEMPTS:-3}"
 
 usage() {
   cat <<'EOF'
@@ -73,6 +74,35 @@ cleanup() {
   if [[ -n "${WORK_DIR:-}" && -d "${WORK_DIR:-}" ]]; then
     trash "$WORK_DIR" >/dev/null 2>&1 || true
   fi
+}
+
+submit_for_notarization() {
+  local attempt=1
+  local stderr_path="$WORK_DIR/notary-submit.stderr"
+  while (( attempt <= NOTARY_SUBMIT_ATTEMPTS )); do
+    if xcrun notarytool submit "$SUBMISSION_ZIP_PATH" \
+      --keychain-profile "$NOTARY_PROFILE" \
+      --wait \
+      --output-format plist > "$NOTARY_RESULT_PATH" 2> "$stderr_path"; then
+      return 0
+    fi
+
+    local stderr_text=""
+    if [[ -f "$stderr_path" ]]; then
+      stderr_text="$(cat "$stderr_path")"
+    fi
+
+    if (( attempt == NOTARY_SUBMIT_ATTEMPTS )) || [[ "$stderr_text" != *"HTTPClientError.connectTimeout"* ]]; then
+      if [[ -n "$stderr_text" ]]; then
+        echo "$stderr_text" >&2
+      fi
+      return 1
+    fi
+
+    echo "Notary submit timed out. Retrying ($((attempt + 1))/$NOTARY_SUBMIT_ATTEMPTS)..." >&2
+    sleep 5
+    ((attempt += 1))
+  done
 }
 
 load_env_file "$ROOT_DIR/.env.local"
@@ -252,10 +282,7 @@ echo "Creating notarization zip"
 ditto -c -k --keepParent "$APP_PATH" "$SUBMISSION_ZIP_PATH"
 
 echo "Submitting for notarization"
-xcrun notarytool submit "$SUBMISSION_ZIP_PATH" \
-  --keychain-profile "$NOTARY_PROFILE" \
-  --wait \
-  --output-format plist > "$NOTARY_RESULT_PATH"
+submit_for_notarization
 
 SUBMISSION_ID="$(/usr/libexec/PlistBuddy -c 'Print :id' "$NOTARY_RESULT_PATH")"
 STATUS="$(/usr/libexec/PlistBuddy -c 'Print :status' "$NOTARY_RESULT_PATH")"
