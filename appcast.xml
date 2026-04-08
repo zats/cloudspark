@@ -6,6 +6,22 @@
         <description>Most recent Cloudspark releases.</description>
         <language>en</language>
         <item>
+            <title>1.4.7</title>
+            <pubDate>Wed, 08 Apr 2026 14:40:14 -0400</pubDate>
+            <link>https://raw.githubusercontent.com/zats/cloudspark/main/appcast.xml</link>
+            <sparkle:version>7</sparkle:version>
+            <sparkle:shortVersionString>1.4.7</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[<ul>
+<li>Update appcast for 1.3.6</li>
+<li>Move updates item below settings</li>
+<li>Adjust settings tab icon sizing</li>
+<li>Keep sandbox entitlements in release builds</li>
+</ul>
+]]></description>
+            <enclosure url="https://github.com/zats/cloudspark/releases/download/v1.4.7/Cloudspark-macos.zip" length="2375627" type="application/octet-stream" sparkle:edSignature="d95tgJnLX3x2AcX4apCm2U7rccxJWStsmvYU47ApVjEv4xc+scToZIFE3PBbTGFHRSKsNxf3EUV1Iny2IohaCA=="/>
+        </item>
+        <item>
             <title>1.3.6</title>
             <pubDate>Wed, 08 Apr 2026 14:19:21 -0400</pubDate>
             <link>https://raw.githubusercontent.com/zats/cloudspark/main/appcast.xml</link>
