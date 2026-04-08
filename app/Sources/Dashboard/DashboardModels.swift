@@ -152,7 +152,7 @@ struct DashboardProjectMetrics: Equatable {
     let averageCPUTimeMS: Double
 }
 
-struct DashboardPageDeployment {
+struct DashboardPageDeployment: Equatable {
     let latestStatus: String?
     let latestBranch: String?
     let lastReleaseAt: Date?

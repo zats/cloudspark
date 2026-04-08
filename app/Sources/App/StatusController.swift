@@ -13,11 +13,14 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
 
     private struct RecentBuildChange {
+        let id: String
+        let project: DashboardProject
         let projectName: String
         let status: String
         let statusKind: DashboardStatusKind
         let symbolName: String
         let changedAt: Date
+        let isInProgress: Bool
     }
 
     private struct RecentBuildMenuEntry: Equatable {
@@ -125,7 +128,7 @@ final class StatusController: NSObject, NSMenuDelegate {
         let activeRecentChanges = activeRecentBuildChanges(referenceDate: referenceDate)
         statusItem.button?.image = statusIconImage(
             activeRecentChanges: activeRecentChanges,
-            hasInProgressBuild: latestBuildsByID.values.contains(where: \.isInProgress)
+            hasInProgressBuild: hasInProgressStatuses()
         )
         statusItem.button?.imagePosition = .imageOnly
         statusItem.button?.title = ""
@@ -161,7 +164,7 @@ final class StatusController: NSObject, NSMenuDelegate {
             return nil
         }
         return activeRecentChanges
-            .map { "\($0.projectName): \($0.status)" }
+            .map { "\($0.project.name): \($0.status)" }
             .joined(separator: "\n")
     }
 
@@ -357,6 +360,7 @@ final class StatusController: NSObject, NSMenuDelegate {
                     rebuildProjectsFromSnapshots()
 
                 case .pageDeployments:
+                    let previousDeployments = pageDeploymentsByID
                     var nextPageDeploymentsByID: [String: DashboardPageDeployment] = [:]
                     for session in sessions {
                         let projectNames = overviewProjectsByID.values
@@ -372,6 +376,8 @@ final class StatusController: NSObject, NSMenuDelegate {
                             nextPageDeploymentsByID["\(session.accountID ?? ""):page:\(projectName)"] = deployment
                         }
                     }
+                    recordPageDeploymentChanges(from: previousDeployments, to: nextPageDeploymentsByID)
+                    notifyAboutPageDeploymentChanges(from: previousDeployments, to: nextPageDeploymentsByID)
                     pageDeploymentsByID = nextPageDeploymentsByID
                     hasLoadedPageDeployments = true
                     lastRefreshedAt = Date()
@@ -658,11 +664,12 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
 
     private func updateBuildSelectionAndSummary() {
-        let running = latestBuildsByID.values.filter(\.isInProgress)
+        let running = latestBuildsByID.values.filter(\.isInProgress).count
+            + pageDeploymentsByID.values.filter { DashboardStatusKind(status: $0.latestStatus) == .inProgress }.count
         updateStatusIcon()
 
-        if !running.isEmpty {
-            updateSummary("\(running.count) active build(s)")
+        if running > 0 {
+            updateSummary("\(running) active build(s)")
         } else if !hasLoadedOverview || !hasLoadedLatestBuilds {
             updateSummary("Refreshing…")
         } else if projects.isEmpty {
@@ -716,16 +723,13 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
 
     private func recentBuildMenuEntries(referenceDate: Date) -> [RecentBuildMenuEntry] {
-        uniqueBuildEntries(latestBuildsByID)
-            .compactMap { buildKey, build in
-                guard shouldShowInRecentBuildsMenu(build, referenceDate: referenceDate) else {
-                    return nil
-                }
-                return RecentBuildMenuEntry(
-                    id: build.id,
-                    project: recentBuildProject(for: buildKey, build: build),
-                    isInProgress: build.isInProgress,
-                    createdAt: buildCreatedAt(build)
+        activeRecentBuildChanges(referenceDate: referenceDate)
+            .map { change in
+                RecentBuildMenuEntry(
+                    id: change.id,
+                    project: change.project,
+                    isInProgress: change.isInProgress,
+                    createdAt: change.changedAt
                 )
             }
             .sorted { lhs, rhs in
@@ -870,16 +874,6 @@ final class StatusController: NSObject, NSMenuDelegate {
         )
     }
 
-    private func shouldShowInRecentBuildsMenu(_ build: DashboardBuild, referenceDate: Date) -> Bool {
-        if build.isInProgress {
-            return true
-        }
-        guard let createdAt = buildCreatedAt(build) else {
-            return false
-        }
-        return referenceDate.timeIntervalSince(createdAt) <= recentBuildMenuWindow
-    }
-
     private func buildCreatedAt(_ build: DashboardBuild) -> Date? {
         guard let createdOn = build.createdOn else {
             return nil
@@ -919,12 +913,43 @@ final class StatusController: NSObject, NSMenuDelegate {
                 continue
             }
             let status = displayStatus(for: build)
+            let project = recentBuildProject(for: buildKey, build: build)
             recentBuildChangesByKey[buildKey] = RecentBuildChange(
+                id: buildKey,
+                project: project,
                 projectName: projectName(for: buildKey),
                 status: status,
                 statusKind: buildStatusKind(for: build),
                 symbolName: statusIconSymbolName(for: build),
                 changedAt: now
+                ,
+                isInProgress: build.isInProgress
+            )
+        }
+        pruneRecentBuildChanges(referenceDate: now)
+    }
+
+    private func recordPageDeploymentChanges(
+        from previousDeployments: [String: DashboardPageDeployment],
+        to nextDeployments: [String: DashboardPageDeployment]
+    ) {
+        let now = Date()
+        for (projectID, deployment) in nextDeployments {
+            let previousDeployment = previousDeployments[projectID]
+            guard shouldNotify(for: deployment, previous: previousDeployment) else {
+                continue
+            }
+            let status = deployment.latestStatus?.lowercased() ?? "unknown"
+            let statusKind = DashboardStatusKind(status: deployment.latestStatus)
+            recentBuildChangesByKey[projectID] = RecentBuildChange(
+                id: projectID,
+                project: recentPageProject(for: projectID, deployment: deployment),
+                projectName: projectName(forPageProjectID: projectID),
+                status: status,
+                statusKind: statusKind,
+                symbolName: statusIconSymbolName(for: statusKind),
+                changedAt: deployment.lastReleaseAt ?? now,
+                isInProgress: statusKind == .inProgress
             )
         }
         pruneRecentBuildChanges(referenceDate: now)
@@ -958,6 +983,29 @@ final class StatusController: NSObject, NSMenuDelegate {
         }
     }
 
+    private func notifyAboutPageDeploymentChanges(
+        from previousDeployments: [String: DashboardPageDeployment],
+        to nextDeployments: [String: DashboardPageDeployment]
+    ) {
+        guard AppPreferences.notificationsEnabled, hasLoadedPageDeployments else {
+            return
+        }
+
+        for (projectID, deployment) in nextDeployments {
+            let previousDeployment = previousDeployments[projectID]
+            guard shouldNotify(for: deployment, previous: previousDeployment) else {
+                continue
+            }
+
+            let status = deployment.latestStatus?.lowercased() ?? "unknown"
+            let body = deployment.latestBranch.map { "\(status) • \($0)" } ?? status
+            let statusKind = DashboardStatusKind(status: deployment.latestStatus)
+            if statusKind == .inProgress || statusKind == .success || statusKind == .failure {
+                BuildNotificationManager.notify(title: projectName(forPageProjectID: projectID), body: body)
+            }
+        }
+    }
+
     private func uniqueBuildEntries(_ builds: [String: DashboardBuild]) -> [(String, DashboardBuild)] {
         var seenBuildIDs = Set<String>()
         var result: [(String, DashboardBuild)] = []
@@ -972,6 +1020,10 @@ final class StatusController: NSObject, NSMenuDelegate {
 
     private func projectName(for buildKey: String) -> String {
         overviewProjectsByID.values.first(where: { $0.buildID == buildKey })?.name ?? "Worker"
+    }
+
+    private func projectName(forPageProjectID projectID: String) -> String {
+        overviewProjectsByID[projectID]?.name ?? projectID.split(separator: ":").last.map(String.init) ?? "Page"
     }
 
     private func projectName(for buildKey: String, build: DashboardBuild) -> String {
@@ -1004,6 +1056,19 @@ final class StatusController: NSObject, NSMenuDelegate {
         return "icloud.fill"
     }
 
+    private func statusIconSymbolName(for statusKind: DashboardStatusKind) -> String {
+        switch statusKind {
+        case .inProgress:
+            Self.inProgressStatusImageName
+        case .failure:
+            "exclamationmark.icloud.fill"
+        case .success:
+            "checkmark.icloud.fill"
+        case .neutral:
+            "icloud.fill"
+        }
+    }
+
     private func buildStatusKind(for build: DashboardBuild) -> DashboardStatusKind {
         if build.isInProgress {
             return .inProgress
@@ -1034,6 +1099,64 @@ final class StatusController: NSObject, NSMenuDelegate {
             return true
         }
         return false
+    }
+
+    private func shouldNotify(for deployment: DashboardPageDeployment, previous: DashboardPageDeployment?) -> Bool {
+        guard let previous else {
+            return false
+        }
+        let statusKind = DashboardStatusKind(status: deployment.latestStatus)
+        guard statusKind == .inProgress || statusKind == .success || statusKind == .failure else {
+            return false
+        }
+        if previous.lastReleaseAt != deployment.lastReleaseAt {
+            return true
+        }
+        if previous.latestStatus != deployment.latestStatus {
+            return true
+        }
+        if previous.latestBranch != deployment.latestBranch {
+            return true
+        }
+        return false
+    }
+
+    private func recentPageProject(for projectID: String, deployment: DashboardPageDeployment) -> DashboardProject {
+        if let baseProject = overviewProjectsByID[projectID] {
+            return DashboardProject(
+                accountID: baseProject.accountID,
+                accountEmail: accountEmail(for: baseProject.accountID),
+                kind: .page,
+                name: baseProject.name,
+                subtitle: baseProject.subtitle,
+                externalScriptID: nil,
+                latestStatus: deployment.latestStatus,
+                latestBranch: deployment.latestBranch,
+                lastReleaseAt: deployment.lastReleaseAt,
+                metrics: nil
+            )
+        }
+
+        let components = projectID.split(separator: ":", maxSplits: 2).map(String.init)
+        let accountID = components.first ?? ""
+        let name = components.last ?? "Page"
+        return DashboardProject(
+            accountID: accountID,
+            accountEmail: accountEmail(for: accountID),
+            kind: .page,
+            name: name,
+            subtitle: nil,
+            externalScriptID: nil,
+            latestStatus: deployment.latestStatus,
+            latestBranch: deployment.latestBranch,
+            lastReleaseAt: deployment.lastReleaseAt,
+            metrics: nil
+        )
+    }
+
+    private func hasInProgressStatuses() -> Bool {
+        latestBuildsByID.values.contains(where: \.isInProgress)
+            || pageDeploymentsByID.values.contains(where: { DashboardStatusKind(status: $0.latestStatus) == .inProgress })
     }
 
     func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {
