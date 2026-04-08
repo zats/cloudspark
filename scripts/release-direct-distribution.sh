@@ -77,13 +77,22 @@ cleanup() {
 }
 
 developer_id_identity() {
+  local identity_name=""
   if [[ -n "${CLOUDFLARE2_CODESIGN_IDENTITY:-}" ]]; then
-    printf '%s\n' "$CLOUDFLARE2_CODESIGN_IDENTITY"
-    return 0
+    identity_name="$CLOUDFLARE2_CODESIGN_IDENTITY"
+  else
+    identity_name="$(
+      codesign -dvv "$APP_PATH" 2>&1 \
+        | awk -F= '/^Authority=Developer ID Application:/ {print $2; exit}'
+    )"
   fi
 
-  codesign -dvv "$APP_PATH" 2>&1 \
-    | awk -F= '/^Authority=Developer ID Application:/ {print $2; exit}'
+  [[ -n "$identity_name" ]] || return 1
+
+  security find-identity -v -p codesigning \
+    | awk -v identity="$identity_name" '
+      $0 ~ identity { gsub(/"/, "", $2); print $2; exit }
+    '
 }
 
 resign_sparkle_bundle() {
