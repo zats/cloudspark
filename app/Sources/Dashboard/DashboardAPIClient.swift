@@ -99,7 +99,8 @@ final class DashboardAPIClient {
                             ?? environment?["modified_on"] as? String
                             ?? script?["modified_on"] as? String
                     ),
-                    metrics: nil
+                    metrics: nil,
+                    destinationURL: nil
                 )
             case "project":
                 guard let project = item["project"] as? [String: Any],
@@ -118,7 +119,8 @@ final class DashboardAPIClient {
                     latestStatus: nil,
                     latestBranch: nil,
                     lastReleaseAt: parseDate(project["last_activity"] as? String),
-                    metrics: nil
+                    metrics: nil,
+                    destinationURL: nil
                 )
             default:
                 return nil
@@ -150,7 +152,8 @@ final class DashboardAPIClient {
                 latestStatus: nil,
                 latestBranch: nil,
                 lastReleaseAt: nil,
-                metrics: nil
+                metrics: nil,
+                destinationURL: nil
             )
         }
     }
@@ -183,7 +186,8 @@ final class DashboardAPIClient {
                 latestStatus: latestStage?["status"] as? String,
                 latestBranch: metadata?["branch"] as? String,
                 lastReleaseAt: nil,
-                metrics: nil
+                metrics: nil,
+                destinationURL: nil
             )
         }
     }
@@ -333,7 +337,9 @@ final class DashboardAPIClient {
             latestStatus: latestStage?["status"] as? String,
             latestBranch: metadata?["branch"] as? String,
             lastReleaseAt: parseDate(
-                latestDeployment?["modified_on"] as? String
+                latestStage?["started_on"] as? String
+                    ?? latestDeployment?["created_on"] as? String
+                    ?? latestDeployment?["modified_on"] as? String
                     ?? latestStage?["ended_on"] as? String
             )
         )

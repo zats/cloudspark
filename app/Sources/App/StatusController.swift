@@ -164,7 +164,7 @@ final class StatusController: NSObject, NSMenuDelegate {
             return nil
         }
         return activeRecentChanges
-            .map { "\($0.project.name): \($0.status)" }
+            .map { "\($0.project.displayName): \($0.status)" }
             .joined(separator: "\n")
     }
 
@@ -636,7 +636,10 @@ final class StatusController: NSObject, NSMenuDelegate {
                         latestStatus: latestBuild.map(displayStatus(for:)),
                         latestBranch: latestBuild?.branch,
                         lastReleaseAt: baseProject.lastReleaseAt,
-                        metrics: workerMetricsByID[baseProject.id]
+                        metrics: workerMetricsByID[baseProject.id],
+                        destinationURL: latestBuild.flatMap {
+                            workerBuildURL(accountID: baseProject.accountID, workerName: baseProject.name, buildID: $0.id)
+                        }
                     )
 
                 case .page:
@@ -651,12 +654,13 @@ final class StatusController: NSObject, NSMenuDelegate {
                         latestStatus: deployment?.latestStatus ?? baseProject.latestStatus,
                         latestBranch: deployment?.latestBranch ?? baseProject.latestBranch,
                         lastReleaseAt: deployment?.lastReleaseAt ?? baseProject.lastReleaseAt,
-                        metrics: nil
+                        metrics: nil,
+                        destinationURL: nil
                     )
                 }
             }
             .sorted {
-                $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+                $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
             }
 
         rebuildWorkersPagesMenu()
@@ -723,21 +727,61 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
 
     private func recentBuildMenuEntries(referenceDate: Date) -> [RecentBuildMenuEntry] {
-        activeRecentBuildChanges(referenceDate: referenceDate)
-            .map { change in
-                RecentBuildMenuEntry(
-                    id: change.id,
-                    project: change.project,
-                    isInProgress: change.isInProgress,
-                    createdAt: change.changedAt
-                )
+        var entriesByID: [String: RecentBuildMenuEntry] = [:]
+
+        for entry in currentInProgressRecentBuildMenuEntries() {
+            entriesByID[entry.id] = entry
+        }
+
+        for change in activeRecentBuildChanges(referenceDate: referenceDate) {
+            if entriesByID[change.id] != nil {
+                continue
             }
+            entriesByID[change.id] = RecentBuildMenuEntry(
+                id: change.id,
+                project: change.project,
+                isInProgress: change.isInProgress,
+                createdAt: change.changedAt
+            )
+        }
+
+        return entriesByID.values
             .sorted { lhs, rhs in
                 if lhs.isInProgress != rhs.isInProgress {
                     return lhs.isInProgress && !rhs.isInProgress
                 }
                 return (lhs.createdAt ?? .distantPast) > (rhs.createdAt ?? .distantPast)
             }
+    }
+
+    private func currentInProgressRecentBuildMenuEntries() -> [RecentBuildMenuEntry] {
+        var entries: [RecentBuildMenuEntry] = []
+
+        for (buildKey, build) in uniqueBuildEntries(latestBuildsByID) where build.isInProgress {
+            entries.append(
+                RecentBuildMenuEntry(
+                    id: buildKey,
+                    project: recentBuildProject(for: buildKey, build: build),
+                    isInProgress: true,
+                    createdAt: buildCreatedAt(build)
+                )
+            )
+        }
+
+        for (projectID, deployment) in pageDeploymentsByID
+            where DashboardStatusKind(status: deployment.latestStatus) == .inProgress
+        {
+            entries.append(
+                RecentBuildMenuEntry(
+                    id: projectID,
+                    project: recentPageProject(for: projectID, deployment: deployment),
+                    isInProgress: true,
+                    createdAt: deployment.lastReleaseAt
+                )
+            )
+        }
+
+        return entries
     }
 
     private func applyWorkersPagesPlaceholder(title: String) {
@@ -769,32 +813,32 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
 
     private func makeWorkersPagesMenuItem(project: DashboardProject) -> NSMenuItem {
-        let item = NSMenuItem(title: project.name, action: nil, keyEquivalent: "")
+        let item = NSMenuItem(title: project.displayName, action: nil, keyEquivalent: "")
         item.representedObject = project
-        item.view = WorkersPagesMenuItemView(project: project)
+        item.view = WorkersPagesMenuItemView(project: project, onClick: openURLAction(project.destinationURL))
         return item
     }
 
     private func makeRecentBuildMenuItem(entry: RecentBuildMenuEntry) -> NSMenuItem {
-        let item = NSMenuItem(title: entry.project.name, action: nil, keyEquivalent: "")
+        let item = NSMenuItem(title: entry.project.displayName, action: nil, keyEquivalent: "")
         item.representedObject = entry
-        item.view = WorkersPagesMenuItemView(project: entry.project)
+        item.view = WorkersPagesMenuItemView(project: entry.project, onClick: openURLAction(entry.project.destinationURL))
         return item
     }
 
     private func updateWorkersPagesMenuItem(item: NSMenuItem, project: DashboardProject) {
         item.representedObject = project
-        item.title = project.name
+        item.title = project.displayName
         let isHighlighted = item === highlightedWorkersPagesItem
-        (item.view as? WorkersPagesMenuItemView)?.update(project: project)
+        (item.view as? WorkersPagesMenuItemView)?.update(project: project, onClick: openURLAction(project.destinationURL))
         (item.view as? WorkersPagesMenuItemView)?.refreshHighlight(isHighlighted: isHighlighted)
     }
 
     private func updateRecentBuildMenuItem(item: NSMenuItem, entry: RecentBuildMenuEntry) {
         item.representedObject = entry
-        item.title = entry.project.name
+        item.title = entry.project.displayName
         let isHighlighted = item === highlightedRecentBuildItem
-        (item.view as? WorkersPagesMenuItemView)?.update(project: entry.project)
+        (item.view as? WorkersPagesMenuItemView)?.update(project: entry.project, onClick: openURLAction(entry.project.destinationURL))
         (item.view as? WorkersPagesMenuItemView)?.refreshHighlight(isHighlighted: isHighlighted)
     }
 
@@ -860,18 +904,40 @@ final class StatusController: NSObject, NSMenuDelegate {
 
     private func recentBuildProject(for buildKey: String, build: DashboardBuild) -> DashboardProject {
         let accountID = buildKey.split(separator: ":", maxSplits: 1).first.map(String.init) ?? ""
+        let projectName = projectName(for: buildKey, build: build)
         return DashboardProject(
             accountID: accountID,
             accountEmail: accountEmail(for: accountID),
             kind: .worker,
-            name: projectName(for: buildKey, build: build),
+            name: projectName,
             subtitle: build.branch,
             externalScriptID: nil,
             latestStatus: displayStatus(for: build),
             latestBranch: build.branch,
             lastReleaseAt: buildCreatedAt(build),
-            metrics: nil
+            metrics: nil,
+            destinationURL: workerBuildURL(accountID: accountID, workerName: projectName, buildID: build.id)
         )
+    }
+
+    private func workerBuildURL(accountID: String, workerName: String, buildID: String) -> URL? {
+        guard let escapedWorkerName = workerName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let escapedBuildID = buildID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
+        else {
+            return nil
+        }
+        return URL(string: "https://dash.cloudflare.com/\(accountID)/workers/services/view/\(escapedWorkerName)/production/builds/\(escapedBuildID)")
+    }
+
+    private func openURLAction(_ url: URL?) -> (() -> Void)? {
+        guard let url else {
+            return nil
+        }
+        return { [weak self] in
+            self?.menu.cancelTracking()
+            self?.workersPagesMenu.cancelTracking()
+            NSWorkspace.shared.open(url)
+        }
     }
 
     private func buildCreatedAt(_ build: DashboardBuild) -> Date? {
@@ -948,7 +1014,7 @@ final class StatusController: NSObject, NSMenuDelegate {
                 status: status,
                 statusKind: statusKind,
                 symbolName: statusIconSymbolName(for: statusKind),
-                changedAt: deployment.lastReleaseAt ?? now,
+                changedAt: statusKind == .inProgress ? now : (deployment.lastReleaseAt ?? now),
                 isInProgress: statusKind == .inProgress
             )
         }
@@ -969,7 +1035,7 @@ final class StatusController: NSObject, NSMenuDelegate {
                 continue
             }
 
-            let projectName = projectName(for: buildKey)
+            let projectName = DashboardDemoMode.displayProjectName(projectName(for: buildKey))
             let status = displayStatus(for: build)
             let body = build.branch.map { "\(status) • \($0)" } ?? status
 
@@ -1001,7 +1067,10 @@ final class StatusController: NSObject, NSMenuDelegate {
             let body = deployment.latestBranch.map { "\(status) • \($0)" } ?? status
             let statusKind = DashboardStatusKind(status: deployment.latestStatus)
             if statusKind == .inProgress || statusKind == .success || statusKind == .failure {
-                BuildNotificationManager.notify(title: projectName(forPageProjectID: projectID), body: body)
+                BuildNotificationManager.notify(
+                    title: DashboardDemoMode.displayProjectName(projectName(forPageProjectID: projectID)),
+                    body: body
+                )
             }
         }
     }
@@ -1133,7 +1202,8 @@ final class StatusController: NSObject, NSMenuDelegate {
                 latestStatus: deployment.latestStatus,
                 latestBranch: deployment.latestBranch,
                 lastReleaseAt: deployment.lastReleaseAt,
-                metrics: nil
+                metrics: nil,
+                destinationURL: nil
             )
         }
 
@@ -1150,7 +1220,8 @@ final class StatusController: NSObject, NSMenuDelegate {
             latestStatus: deployment.latestStatus,
             latestBranch: deployment.latestBranch,
             lastReleaseAt: deployment.lastReleaseAt,
-            metrics: nil
+            metrics: nil,
+            destinationURL: nil
         )
     }
 

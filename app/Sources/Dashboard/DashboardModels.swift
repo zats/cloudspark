@@ -1,5 +1,24 @@
 import Foundation
 
+enum DashboardDemoMode {
+    static let isEnabled: Bool = {
+        guard let value = ProcessInfo.processInfo.environment["DEMO"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        else {
+            return false
+        }
+        return ["1", "true", "yes", "on"].contains(value)
+    }()
+
+    static func displayProjectName(_ name: String) -> String {
+        guard isEnabled else {
+            return name
+        }
+        return name.replacingOccurrences(of: "lorica", with: "mythos")
+    }
+}
+
 enum DashboardStatusKind: Equatable {
     case inProgress
     case success
@@ -174,9 +193,14 @@ struct DashboardProject: Equatable {
     let latestBranch: String?
     let lastReleaseAt: Date?
     let metrics: DashboardProjectMetrics?
+    let destinationURL: URL?
 
     var statusText: String? {
         latestStatus
+    }
+
+    var displayName: String {
+        DashboardDemoMode.displayProjectName(name)
     }
 
     var statusKind: DashboardStatusKind {

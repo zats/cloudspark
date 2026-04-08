@@ -14,17 +14,19 @@ final class WorkersPagesMenuItemView: NSView {
     private let cpuItem = MetricItemView(symbolName: "cpu")
     private let releaseItem = MetricItemView(symbolName: "clock")
     private var project: DashboardProject
+    private var onClick: (() -> Void)?
     private var isPointerHovering = false
     private var trackingArea: NSTrackingArea?
     private let rowWidth: CGFloat = 360
     private let rowHeight: CGFloat = 64
 
-    init(project: DashboardProject) {
+    init(project: DashboardProject, onClick: (() -> Void)? = nil) {
         self.project = project
+        self.onClick = onClick
         super.init(frame: NSRect(x: 0, y: 0, width: rowWidth, height: rowHeight))
         translatesAutoresizingMaskIntoConstraints = false
         setup()
-        update(project: project)
+        update(project: project, onClick: onClick)
     }
 
     @available(*, unavailable)
@@ -32,18 +34,19 @@ final class WorkersPagesMenuItemView: NSView {
         fatalError()
     }
 
-    func update(project: DashboardProject) {
+    func update(project: DashboardProject, onClick: (() -> Void)? = nil) {
         self.project = project
+        self.onClick = onClick
         let symbolName = switch project.kind {
         case .worker: "gearshape"
         case .page: "richtext.page"
         }
         iconView.image = NSImage(
             systemSymbolName: symbolName,
-            accessibilityDescription: project.name
+            accessibilityDescription: project.displayName
         )
         iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 16, weight: .medium)
-        nameLabel.stringValue = project.name
+        nameLabel.stringValue = project.displayName
         subtitleLabel.stringValue = project.subtitle ?? ""
         subtitleLabel.isHidden = (project.subtitle?.isEmpty ?? true)
 
@@ -61,6 +64,8 @@ final class WorkersPagesMenuItemView: NSView {
 
         let hasVisibleMetrics = [requestsItem, errorsItem, cpuItem, releaseItem].contains { !$0.isHidden }
         metricsStack.isHidden = !hasVisibleMetrics
+        discardCursorRects()
+        window?.invalidateCursorRects(for: self)
 
         refreshHighlight()
     }
@@ -166,6 +171,28 @@ final class WorkersPagesMenuItemView: NSView {
         isPointerHovering = false
         refreshHighlight()
         super.mouseExited(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard let onClick else {
+            super.mouseUp(with: event)
+            return
+        }
+        let point = convert(event.locationInWindow, from: nil)
+        guard bounds.contains(point) else {
+            super.mouseUp(with: event)
+            return
+        }
+        enclosingMenuItem?.menu?.cancelTracking()
+        onClick()
+    }
+
+    override func resetCursorRects() {
+        discardCursorRects()
+        guard onClick != nil else {
+            return
+        }
+        addCursorRect(bounds, cursor: .pointingHand)
     }
 
     func refreshHighlight(isHighlighted: Bool? = nil) {
