@@ -4,6 +4,7 @@ enum AppPreferences {
     private static let notificationsEnabledKey = "notificationsEnabled"
     private static let refreshIntervalKey = "refreshInterval"
     private static let favoriteProjectIDsKey = "favoriteProjectIDs"
+    private static let hiddenProjectsKey = "hiddenProjects"
 
     enum RefreshInterval: String, CaseIterable {
         case manual
@@ -59,5 +60,19 @@ enum AppPreferences {
 
     static func setFavoriteProjectIDs(_ ids: Set<String>) {
         UserDefaults.standard.set(Array(ids).sorted(), forKey: favoriteProjectIDsKey)
+    }
+
+    static var hiddenProjects: [DashboardHiddenProject] {
+        guard let data = UserDefaults.standard.data(forKey: hiddenProjectsKey) else {
+            return []
+        }
+        return (try? JSONDecoder().decode([DashboardHiddenProject].self, from: data)) ?? []
+    }
+
+    static func setHiddenProjects(_ projects: [DashboardHiddenProject]) {
+        let unique = Dictionary(projects.map { ($0.id, $0) }, uniquingKeysWith: { _, rhs in rhs })
+        let ordered = unique.values.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+        let data = try? JSONEncoder().encode(ordered)
+        UserDefaults.standard.set(data, forKey: hiddenProjectsKey)
     }
 }

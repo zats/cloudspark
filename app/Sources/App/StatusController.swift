@@ -73,6 +73,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     private var recentBuildChangesByKey: [String: RecentBuildChange] = [:]
     private var recentBuildMenuItems: [NSMenuItem] = []
     private var favoriteProjectIDs = AppPreferences.favoriteProjectIDs
+    private var hiddenProjects = AppPreferences.hiddenProjects
     private let updateController: UpdateControlling
 
     init(updateController: UpdateControlling) {
@@ -177,7 +178,9 @@ final class StatusController: NSObject, NSMenuDelegate {
 
     private func activeRecentBuildChanges(referenceDate: Date = Date()) -> [RecentBuildChange] {
         pruneRecentBuildChanges(referenceDate: referenceDate)
-        return recentBuildChangesByKey.values.sorted { lhs, rhs in
+        return recentBuildChangesByKey.values
+            .filter { !isHidden($0.project) }
+            .sorted { lhs, rhs in
             lhs.changedAt > rhs.changedAt
         }
     }
@@ -278,7 +281,7 @@ final class StatusController: NSObject, NSMenuDelegate {
             do {
                 _ = try await ensureSessions(forceLogin: true)
                 syncMenuState()
-                settingsController.refresh(sessions: sessions)
+                settingsController.refresh(sessions: sessions, hiddenProjects: hiddenProjects)
             } catch {
                 if case DashboardError.userCancelledLogin = error {
                     return
@@ -518,6 +521,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     private func presentSettings(selectedTab: SettingsWindowController.Tab, triggerLogin: Bool) {
         settingsController.show(
             sessions: sessions,
+            hiddenProjects: hiddenProjects,
             selectedTab: selectedTab,
             onLogin: { [weak self] in
                 Task { @MainActor in
@@ -526,7 +530,7 @@ final class StatusController: NSObject, NSMenuDelegate {
                         _ = try await self.ensureSessions(forceLogin: true)
                         self.syncMenuState()
                         self.scheduleRefresh()
-                        self.settingsController.refresh(sessions: self.sessions)
+                        self.settingsController.refresh(sessions: self.sessions, hiddenProjects: self.hiddenProjects)
                     } catch {
                         if case DashboardError.userCancelledLogin = error {
                             return
@@ -538,13 +542,16 @@ final class StatusController: NSObject, NSMenuDelegate {
             onLogout: { [weak self] targetSession in
                 self?.logout(targetSession)
             },
+            onUnhideProject: { [weak self] hiddenProject in
+                self?.unhideProject(hiddenProject)
+            },
             onSetLaunchAtLogin: { [weak self] enabled in
                 do {
                     try LaunchAtLoginManager.setEnabled(enabled)
-                    self?.settingsController.refresh(sessions: self?.sessions ?? [])
+                    self?.settingsController.refresh(sessions: self?.sessions ?? [], hiddenProjects: self?.hiddenProjects ?? [])
                 } catch {
                     self?.presentError(error)
-                    self?.settingsController.refresh(sessions: self?.sessions ?? [])
+                    self?.settingsController.refresh(sessions: self?.sessions ?? [], hiddenProjects: self?.hiddenProjects ?? [])
                 }
             },
             onSetNotificationsEnabled: { [weak self] enabled in
@@ -559,13 +566,13 @@ final class StatusController: NSObject, NSMenuDelegate {
                         AppPreferences.setNotificationsEnabled(false)
                         self.presentError(error)
                     }
-                    self.settingsController.refresh(sessions: self.sessions)
+                    self.settingsController.refresh(sessions: self.sessions, hiddenProjects: self.hiddenProjects)
                 }
             },
             onSetRefreshInterval: { [weak self] interval in
                 AppPreferences.setRefreshInterval(interval)
                 self?.scheduleRefresh()
-                self?.settingsController.refresh(sessions: self?.sessions ?? [])
+                self?.settingsController.refresh(sessions: self?.sessions ?? [], hiddenProjects: self?.hiddenProjects ?? [])
             }
         )
         if triggerLogin, sessions.isEmpty, sessionTask == nil, !didRequestStartupLogin {
@@ -577,7 +584,7 @@ final class StatusController: NSObject, NSMenuDelegate {
                     _ = try await self.ensureSessions(forceLogin: true)
                     self.syncMenuState()
                     self.scheduleRefresh()
-                    self.settingsController.refresh(sessions: self.sessions)
+                    self.settingsController.refresh(sessions: self.sessions, hiddenProjects: self.hiddenProjects)
                 } catch {
                     if case DashboardError.userCancelledLogin = error {
                         return
@@ -606,7 +613,7 @@ final class StatusController: NSObject, NSMenuDelegate {
             hasLoadedPageDeployments = false
             recentBuildChangesByKey = [:]
             rebuildWorkersPagesMenu()
-            settingsController.refresh(sessions: sessions)
+            settingsController.refresh(sessions: sessions, hiddenProjects: hiddenProjects)
             syncMenuState()
             updateStatusIcon()
             updateSummary("Logged out")
@@ -670,6 +677,7 @@ final class StatusController: NSObject, NSMenuDelegate {
                     )
                 }
             }
+            .filter { !isHidden($0) }
             .sorted {
                 if isFavorite($0) != isFavorite($1) {
                     return isFavorite($0)
@@ -682,8 +690,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
 
     private func updateBuildSelectionAndSummary() {
-        let running = latestBuildsByID.values.filter(\.isInProgress).count
-            + pageDeploymentsByID.values.filter { DashboardStatusKind(status: $0.latestStatus) == .inProgress }.count
+        let running = projects.filter { $0.statusKind == .inProgress }.count
         updateStatusIcon()
 
         if running > 0 {
@@ -779,6 +786,10 @@ final class StatusController: NSObject, NSMenuDelegate {
 
         for (buildKey, build) in uniqueBuildEntries(latestBuildsByID) {
             let statusKind = buildStatusKind(for: build)
+            let project = recentBuildProject(for: buildKey, build: build)
+            guard !isHidden(project) else {
+                continue
+            }
             guard statusKind == .inProgress
                 || ((statusKind == .success || statusKind == .failure)
                     && isWithinRecentBuildWindow(buildCreatedAt(build), referenceDate: referenceDate))
@@ -788,7 +799,7 @@ final class StatusController: NSObject, NSMenuDelegate {
             entries.append(
                 RecentBuildMenuEntry(
                     id: build.id,
-                    project: recentBuildProject(for: buildKey, build: build),
+                    project: project,
                     isInProgress: statusKind == .inProgress,
                     changedAt: buildCreatedAt(build)
                 )
@@ -797,6 +808,10 @@ final class StatusController: NSObject, NSMenuDelegate {
 
         for (projectID, deployment) in pageDeploymentsByID {
             let statusKind = DashboardStatusKind(status: deployment.latestStatus)
+            let project = recentPageProject(for: projectID, deployment: deployment)
+            guard !isHidden(project) else {
+                continue
+            }
             guard statusKind == .inProgress
                 || ((statusKind == .success || statusKind == .failure)
                     && isWithinRecentBuildWindow(deployment.lastReleaseAt, referenceDate: referenceDate))
@@ -806,7 +821,7 @@ final class StatusController: NSObject, NSMenuDelegate {
             entries.append(
                 RecentBuildMenuEntry(
                     id: recentDeploymentKey(projectID: projectID, deployment: deployment),
-                    project: recentPageProject(for: projectID, deployment: deployment),
+                    project: project,
                     isInProgress: statusKind == .inProgress,
                     changedAt: deployment.lastReleaseAt
                 )
@@ -857,7 +872,8 @@ final class StatusController: NSObject, NSMenuDelegate {
             project: project,
             isFavorite: isFavorite(project),
             onClick: openURLAction(project.destinationURL),
-            onToggleFavorite: toggleFavoriteAction(project)
+            onToggleFavorite: toggleFavoriteAction(project),
+            onHide: hideProjectAction(project)
         )
         return item
     }
@@ -869,7 +885,8 @@ final class StatusController: NSObject, NSMenuDelegate {
             project: entry.project,
             isFavorite: isFavorite(entry.project),
             onClick: openURLAction(entry.project.destinationURL),
-            onToggleFavorite: toggleFavoriteAction(entry.project)
+            onToggleFavorite: toggleFavoriteAction(entry.project),
+            onHide: hideProjectAction(entry.project)
         )
         return item
     }
@@ -881,7 +898,8 @@ final class StatusController: NSObject, NSMenuDelegate {
             project: project,
             isFavorite: isFavorite(project),
             onClick: openURLAction(project.destinationURL),
-            onToggleFavorite: toggleFavoriteAction(project)
+            onToggleFavorite: toggleFavoriteAction(project),
+            onHide: hideProjectAction(project)
         )
         (item.view as? WorkersPagesMenuItemView)?.syncPointerHoverState()
     }
@@ -893,7 +911,8 @@ final class StatusController: NSObject, NSMenuDelegate {
             project: entry.project,
             isFavorite: isFavorite(entry.project),
             onClick: openURLAction(entry.project.destinationURL),
-            onToggleFavorite: toggleFavoriteAction(entry.project)
+            onToggleFavorite: toggleFavoriteAction(entry.project),
+            onHide: hideProjectAction(entry.project)
         )
         (item.view as? WorkersPagesMenuItemView)?.syncPointerHoverState()
     }
@@ -996,6 +1015,12 @@ final class StatusController: NSObject, NSMenuDelegate {
         }
     }
 
+    private func hideProjectAction(_ project: DashboardProject) -> (() -> Void) {
+        { [weak self] in
+            self?.hideProject(project)
+        }
+    }
+
     private func toggleFavorite(for project: DashboardProject) {
         if favoriteProjectIDs.contains(project.id) {
             favoriteProjectIDs.remove(project.id)
@@ -1012,8 +1037,35 @@ final class StatusController: NSObject, NSMenuDelegate {
         }
     }
 
+    private func hideProject(_ project: DashboardProject) {
+        hiddenProjects.removeAll { $0.id == project.id }
+        hiddenProjects.append(DashboardHiddenProject(project: project))
+        AppPreferences.setHiddenProjects(hiddenProjects)
+        favoriteProjectIDs.remove(project.id)
+        AppPreferences.setFavoriteProjectIDs(favoriteProjectIDs)
+        recentBuildChangesByKey = recentBuildChangesByKey.filter { $0.value.project.id != project.id }
+        clearMenuInteractionState()
+        rebuildProjectsFromSnapshots()
+        rebuildRecentBuildsMenu()
+        settingsController.refresh(sessions: sessions, hiddenProjects: hiddenProjects)
+        updateBuildSelectionAndSummary()
+    }
+
+    private func unhideProject(_ hiddenProject: DashboardHiddenProject) {
+        hiddenProjects.removeAll { $0.id == hiddenProject.id }
+        AppPreferences.setHiddenProjects(hiddenProjects)
+        rebuildProjectsFromSnapshots()
+        rebuildRecentBuildsMenu()
+        settingsController.refresh(sessions: sessions, hiddenProjects: hiddenProjects)
+        updateBuildSelectionAndSummary()
+    }
+
     private func isFavorite(_ project: DashboardProject) -> Bool {
         favoriteProjectIDs.contains(project.id)
+    }
+
+    private func isHidden(_ project: DashboardProject) -> Bool {
+        hiddenProjects.contains { $0.id == project.id }
     }
 
     private func clearMenuInteractionState() {
@@ -1080,6 +1132,9 @@ final class StatusController: NSObject, NSMenuDelegate {
             }
             let status = displayStatus(for: build)
             let project = recentBuildProject(for: buildKey, build: build)
+            guard !isHidden(project) else {
+                continue
+            }
             recentBuildChangesByKey[build.id] = RecentBuildChange(
                 id: build.id,
                 project: project,
@@ -1105,12 +1160,16 @@ final class StatusController: NSObject, NSMenuDelegate {
             guard shouldNotify(for: deployment, previous: previousDeployment) else {
                 continue
             }
+            let project = recentPageProject(for: projectID, deployment: deployment)
+            guard !isHidden(project) else {
+                continue
+            }
             let status = deployment.latestStatus?.lowercased() ?? "unknown"
             let statusKind = DashboardStatusKind(status: deployment.latestStatus)
             let changeID = recentDeploymentKey(projectID: projectID, deployment: deployment)
             recentBuildChangesByKey[changeID] = RecentBuildChange(
                 id: changeID,
-                project: recentPageProject(for: projectID, deployment: deployment),
+                project: project,
                 projectName: projectName(forPageProjectID: projectID),
                 status: status,
                 statusKind: statusKind,
@@ -1135,8 +1194,12 @@ final class StatusController: NSObject, NSMenuDelegate {
             guard shouldNotify(for: build, previous: previousBuild) else {
                 continue
             }
+            let project = recentBuildProject(for: buildKey, build: build)
+            guard !isHidden(project) else {
+                continue
+            }
 
-            let projectName = DashboardDemoMode.displayProjectName(projectName(for: buildKey))
+            let projectName = project.displayName
             let status = displayStatus(for: build)
             let body = build.branch.map { "\(status) • \($0)" } ?? status
 
@@ -1163,15 +1226,16 @@ final class StatusController: NSObject, NSMenuDelegate {
             guard shouldNotify(for: deployment, previous: previousDeployment) else {
                 continue
             }
+            let project = recentPageProject(for: projectID, deployment: deployment)
+            guard !isHidden(project) else {
+                continue
+            }
 
             let status = deployment.latestStatus?.lowercased() ?? "unknown"
             let body = deployment.latestBranch.map { "\(status) • \($0)" } ?? status
             let statusKind = DashboardStatusKind(status: deployment.latestStatus)
             if statusKind == .inProgress || statusKind == .success || statusKind == .failure {
-                BuildNotificationManager.notify(
-                    title: DashboardDemoMode.displayProjectName(projectName(forPageProjectID: projectID)),
-                    body: body
-                )
+                BuildNotificationManager.notify(title: project.displayName, body: body)
             }
         }
     }
@@ -1335,8 +1399,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
 
     private func hasInProgressStatuses() -> Bool {
-        latestBuildsByID.values.contains(where: \.isInProgress)
-            || pageDeploymentsByID.values.contains(where: { DashboardStatusKind(status: $0.latestStatus) == .inProgress })
+        projects.contains { $0.statusKind == .inProgress }
     }
 
     func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {

@@ -5,12 +5,14 @@ final class SettingsWindowController: NSWindowController {
     enum Tab {
         case general
         case accounts
+        case hidden
     }
 
     private let tabsController = SettingsTabsViewController()
     private let settingsFrameWidth: CGFloat = 400
     private let generalContentHeight: CGFloat = 220
     private let accountsContentHeight: CGFloat = 270
+    private let hiddenContentHeight: CGFloat = 250
 
     init() {
         let window = NSWindow(
@@ -40,21 +42,25 @@ final class SettingsWindowController: NSWindowController {
 
     func show(
         sessions: [DashboardSession],
+        hiddenProjects: [DashboardHiddenProject],
         selectedTab: Tab = .general,
         onLogin: @escaping () -> Void,
         onLogout: @escaping (DashboardSession) -> Void,
+        onUnhideProject: @escaping (DashboardHiddenProject) -> Void,
         onSetLaunchAtLogin: @escaping (Bool) -> Void,
         onSetNotificationsEnabled: @escaping (Bool) -> Void,
         onSetRefreshInterval: @escaping (AppPreferences.RefreshInterval) -> Void
     ) {
         tabsController.update(
             sessions: sessions,
+            hiddenProjects: hiddenProjects,
             isLaunchAtLoginEnabled: LaunchAtLoginManager.isEnabled,
             areNotificationsEnabled: AppPreferences.notificationsEnabled,
             refreshInterval: AppPreferences.refreshInterval
         )
         tabsController.onLogin = onLogin
         tabsController.onLogout = onLogout
+        tabsController.onUnhideProject = onUnhideProject
         tabsController.onSetLaunchAtLogin = onSetLaunchAtLogin
         tabsController.onSetNotificationsEnabled = onSetNotificationsEnabled
         tabsController.onSetRefreshInterval = onSetRefreshInterval
@@ -67,9 +73,10 @@ final class SettingsWindowController: NSWindowController {
         window?.makeKey()
     }
 
-    func refresh(sessions: [DashboardSession]) {
+    func refresh(sessions: [DashboardSession], hiddenProjects: [DashboardHiddenProject]) {
         tabsController.update(
             sessions: sessions,
+            hiddenProjects: hiddenProjects,
             isLaunchAtLoginEnabled: LaunchAtLoginManager.isEnabled,
             areNotificationsEnabled: AppPreferences.notificationsEnabled,
             refreshInterval: AppPreferences.refreshInterval
@@ -85,6 +92,7 @@ final class SettingsWindowController: NSWindowController {
         let targetContentHeight = switch tab {
         case .general: generalContentHeight
         case .accounts: accountsContentHeight
+        case .hidden: hiddenContentHeight
         }
         let contentWidth = window.contentRect(forFrameRect: window.frame).width
         let targetFrameHeight = window.frameRect(forContentRect: NSRect(x: 0, y: 0, width: contentWidth, height: targetContentHeight)).height
@@ -102,6 +110,7 @@ private let tabIconSize: CGFloat = 20
 private final class SettingsTabsViewController: NSTabViewController {
     let generalViewController = GeneralSettingsViewController()
     let accountsViewController = AccountsSettingsViewController()
+    let hiddenProjectsViewController = HiddenProjectsSettingsViewController()
     var onSelectTab: ((SettingsWindowController.Tab) -> Void)?
     private let tabIconConfiguration = NSImage.SymbolConfiguration(pointSize: tabIconSize, weight: .regular)
 
@@ -110,6 +119,9 @@ private final class SettingsTabsViewController: NSTabViewController {
     }
     var onLogout: ((DashboardSession) -> Void)? {
         didSet { accountsViewController.onLogout = onLogout }
+    }
+    var onUnhideProject: ((DashboardHiddenProject) -> Void)? {
+        didSet { hiddenProjectsViewController.onUnhideProject = onUnhideProject }
     }
     var onSetLaunchAtLogin: ((Bool) -> Void)? {
         didSet { generalViewController.onSetLaunchAtLogin = onSetLaunchAtLogin }
@@ -133,12 +145,18 @@ private final class SettingsTabsViewController: NSTabViewController {
         accountsItem.label = "Accounts"
         accountsItem.image = tabImage(systemName: "person.crop.circle")
 
+        let hiddenItem = NSTabViewItem(viewController: hiddenProjectsViewController)
+        hiddenItem.label = "Hidden"
+        hiddenItem.image = tabImage(systemName: "eye.slash")
+
         addTabViewItem(generalItem)
         addTabViewItem(accountsItem)
+        addTabViewItem(hiddenItem)
     }
 
     func update(
         sessions: [DashboardSession],
+        hiddenProjects: [DashboardHiddenProject],
         isLaunchAtLoginEnabled: Bool,
         areNotificationsEnabled: Bool,
         refreshInterval: AppPreferences.RefreshInterval
@@ -149,12 +167,14 @@ private final class SettingsTabsViewController: NSTabViewController {
             refreshInterval: refreshInterval
         )
         accountsViewController.update(sessions: sessions)
+        hiddenProjectsViewController.update(hiddenProjects: hiddenProjects)
     }
 
     func select(tab: SettingsWindowController.Tab, notify: Bool = true) {
         selectedTabViewItemIndex = switch tab {
         case .general: 0
         case .accounts: 1
+        case .hidden: 2
         }
         if notify {
             onSelectTab?(tab)
@@ -162,7 +182,13 @@ private final class SettingsTabsViewController: NSTabViewController {
     }
 
     override func tabView(_ tabView: NSTabView, didSelect tabViewItem: NSTabViewItem?) {
-        onSelectTab?(selectedTabViewItemIndex == 0 ? .general : .accounts)
+        let tab: SettingsWindowController.Tab
+        switch selectedTabViewItemIndex {
+        case 0: tab = .general
+        case 1: tab = .accounts
+        default: tab = .hidden
+        }
+        onSelectTab?(tab)
     }
 
     private func tabImage(systemName: String) -> NSImage? {
@@ -309,39 +335,12 @@ private final class AccountsSettingsViewController: NSViewController, NSTableVie
     }
 
     private func buildUI() {
-        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("account"))
-        column.isEditable = false
-        column.resizingMask = .autoresizingMask
-        tableView.addTableColumn(column)
-        tableView.headerView = nil
-        tableView.style = .inset
-        tableView.rowHeight = 68
-        tableView.rowSizeStyle = .custom
-        tableView.intercellSpacing = .zero
-        tableView.delegate = self
-        tableView.dataSource = self
-        tableView.usesAlternatingRowBackgroundColors = false
-        tableView.focusRingType = .none
-        tableView.backgroundColor = .clear
+        configure(tableView: tableView, identifier: "account", rowHeight: 68)
         tableView.menuProvider = { [weak self] row in
             self?.makeContextMenu(for: row)
         }
-
+        configure(container: tableContainer, scrollView: scrollView, divider: controlsDivider)
         scrollView.documentView = tableView
-        scrollView.hasVerticalScroller = true
-        scrollView.drawsBackground = false
-        scrollView.borderType = .noBorder
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-
-        tableContainer.wantsLayer = true
-        tableContainer.layer?.cornerRadius = 14
-        tableContainer.layer?.borderWidth = 1
-        tableContainer.layer?.borderColor = NSColor.separatorColor.cgColor
-        tableContainer.translatesAutoresizingMaskIntoConstraints = false
-
-        controlsDivider.wantsLayer = true
-        controlsDivider.layer?.backgroundColor = NSColor.separatorColor.cgColor
-        controlsDivider.translatesAutoresizingMaskIntoConstraints = false
 
         controls.segmentStyle = .separated
         controls.setWidth(28, forSegment: 0)
@@ -454,6 +453,40 @@ private final class AccountsSettingsViewController: NSViewController, NSTableVie
         }
         onLogout?(sessions[tableView.selectedRow])
     }
+
+    private func configure(tableView: AccountsTableView, identifier: String, rowHeight: CGFloat) {
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(identifier))
+        column.isEditable = false
+        column.resizingMask = .autoresizingMask
+        tableView.addTableColumn(column)
+        tableView.headerView = nil
+        tableView.style = .inset
+        tableView.rowHeight = rowHeight
+        tableView.rowSizeStyle = .custom
+        tableView.intercellSpacing = .zero
+        tableView.delegate = self
+        tableView.dataSource = self
+        tableView.usesAlternatingRowBackgroundColors = false
+        tableView.focusRingType = .none
+        tableView.backgroundColor = .clear
+    }
+
+    private func configure(container: NSView, scrollView: NSScrollView, divider: NSView) {
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+
+        container.wantsLayer = true
+        container.layer?.cornerRadius = 14
+        container.layer?.borderWidth = 1
+        container.layer?.borderColor = NSColor.separatorColor.cgColor
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        divider.wantsLayer = true
+        divider.layer?.backgroundColor = NSColor.separatorColor.cgColor
+        divider.translatesAutoresizingMaskIntoConstraints = false
+    }
 }
 
 @MainActor
@@ -527,6 +560,186 @@ private final class AccountCellView: NSTableCellView {
 
             labels.leadingAnchor.constraint(equalTo: avatarView.trailingAnchor, constant: 8),
             labels.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            labels.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+}
+
+@MainActor
+private final class HiddenProjectsSettingsViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
+    private let tableContainer = NSView()
+    private let scrollView = NSScrollView()
+    private let controlsDivider = NSView()
+    private let tableView = AccountsTableView()
+    private let controls = NSSegmentedControl(labels: [""], trackingMode: .momentary, target: nil, action: nil)
+    private var hiddenProjects: [DashboardHiddenProject] = []
+    var onUnhideProject: ((DashboardHiddenProject) -> Void)?
+
+    override func loadView() {
+        view = NSView()
+        buildUI()
+    }
+
+    func update(hiddenProjects: [DashboardHiddenProject]) {
+        self.hiddenProjects = hiddenProjects
+        tableView.reloadData()
+        if !hiddenProjects.isEmpty {
+            tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        } else {
+            tableView.deselectAll(nil)
+        }
+        updateControls()
+    }
+
+    private func buildUI() {
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("hidden"))
+        column.isEditable = false
+        column.resizingMask = .autoresizingMask
+        tableView.addTableColumn(column)
+        tableView.headerView = nil
+        tableView.style = .inset
+        tableView.rowHeight = 52
+        tableView.rowSizeStyle = .custom
+        tableView.intercellSpacing = .zero
+        tableView.delegate = self
+        tableView.dataSource = self
+        tableView.usesAlternatingRowBackgroundColors = false
+        tableView.focusRingType = .none
+        tableView.backgroundColor = .clear
+
+        scrollView.documentView = tableView
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+
+        tableContainer.wantsLayer = true
+        tableContainer.layer?.cornerRadius = 14
+        tableContainer.layer?.borderWidth = 1
+        tableContainer.layer?.borderColor = NSColor.separatorColor.cgColor
+        tableContainer.translatesAutoresizingMaskIntoConstraints = false
+
+        controlsDivider.wantsLayer = true
+        controlsDivider.layer?.backgroundColor = NSColor.separatorColor.cgColor
+        controlsDivider.translatesAutoresizingMaskIntoConstraints = false
+
+        controls.segmentStyle = .separated
+        controls.setWidth(28, forSegment: 0)
+        controls.setImage(NSImage(systemSymbolName: "minus", accessibilityDescription: nil), forSegment: 0)
+        controls.setImageScaling(.scaleProportionallyDown, forSegment: 0)
+        controls.target = self
+        controls.action = #selector(handleControls)
+        controls.translatesAutoresizingMaskIntoConstraints = false
+
+        view.addSubview(tableContainer)
+        tableContainer.addSubview(scrollView)
+        tableContainer.addSubview(controlsDivider)
+        tableContainer.addSubview(controls)
+
+        NSLayoutConstraint.activate([
+            tableContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+            tableContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
+            tableContainer.topAnchor.constraint(equalTo: view.topAnchor, constant: 24),
+            tableContainer.heightAnchor.constraint(equalToConstant: 180),
+
+            scrollView.leadingAnchor.constraint(equalTo: tableContainer.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: tableContainer.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: tableContainer.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: controlsDivider.topAnchor),
+
+            controlsDivider.leadingAnchor.constraint(equalTo: tableContainer.leadingAnchor),
+            controlsDivider.trailingAnchor.constraint(equalTo: tableContainer.trailingAnchor),
+            controlsDivider.bottomAnchor.constraint(equalTo: controls.topAnchor, constant: -8),
+            controlsDivider.heightAnchor.constraint(equalToConstant: 1),
+
+            controls.leadingAnchor.constraint(equalTo: tableContainer.leadingAnchor, constant: 10),
+            controls.bottomAnchor.constraint(equalTo: tableContainer.bottomAnchor, constant: -8),
+        ])
+    }
+
+    private func updateControls() {
+        controls.setEnabled(tableView.selectedRow >= 0 && tableView.selectedRow < hiddenProjects.count, forSegment: 0)
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        hiddenProjects.count
+    }
+
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        updateControls()
+    }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        let identifier = NSUserInterfaceItemIdentifier("hiddenCell")
+        let view = (tableView.makeView(withIdentifier: identifier, owner: self) as? HiddenProjectCellView) ?? HiddenProjectCellView()
+        view.identifier = identifier
+        view.configure(project: hiddenProjects[row])
+        return view
+    }
+
+    @objc
+    private func handleControls() {
+        defer { controls.selectedSegment = -1 }
+        guard tableView.selectedRow >= 0, tableView.selectedRow < hiddenProjects.count else {
+            return
+        }
+        onUnhideProject?(hiddenProjects[tableView.selectedRow])
+    }
+}
+
+@MainActor
+private final class HiddenProjectCellView: NSTableCellView {
+    private let iconView = NSImageView()
+    private let nameLabel = NSTextField(labelWithString: "")
+    private let detailLabel = NSTextField(labelWithString: "")
+
+    init() {
+        super.init(frame: .zero)
+        buildUI()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError()
+    }
+
+    func configure(project: DashboardHiddenProject) {
+        let symbolName = switch project.kind {
+        case .worker: "gearshape"
+        case .page: "richtext.page"
+        }
+        iconView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: project.displayName)
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+        iconView.contentTintColor = .secondaryLabelColor
+        nameLabel.stringValue = project.displayName
+        detailLabel.stringValue = project.displayAccountEmail ?? ""
+        detailLabel.isHidden = (project.displayAccountEmail?.isEmpty ?? true)
+    }
+
+    private func buildUI() {
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+
+        nameLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        detailLabel.font = .systemFont(ofSize: 11)
+        detailLabel.textColor = .secondaryLabelColor
+
+        let labels = NSStackView(views: [nameLabel, detailLabel])
+        labels.orientation = .vertical
+        labels.alignment = .leading
+        labels.spacing = 2
+        labels.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(iconView)
+        addSubview(labels)
+
+        NSLayoutConstraint.activate([
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 18),
+            iconView.heightAnchor.constraint(equalToConstant: 18),
+
+            labels.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 8),
+            labels.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
             labels.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
     }

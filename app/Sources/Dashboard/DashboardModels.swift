@@ -185,7 +185,7 @@ struct DashboardPageDeployment: Equatable {
     let lastReleaseAt: Date?
 }
 
-enum DashboardProjectKind: Equatable {
+enum DashboardProjectKind: String, Codable, Equatable {
     case worker
     case page
 }
@@ -220,10 +220,36 @@ struct DashboardProject: Equatable {
     }
 
     var id: String {
-        "\(accountID):\(kind == .worker ? "worker" : "page"):\(name)"
+        "\(accountID):\(kind.rawValue):\(name)"
     }
 
     var buildID: String? {
         externalScriptID.map { "\(accountID):\($0)" }
+    }
+}
+
+struct DashboardHiddenProject: Codable, Equatable {
+    let accountID: String
+    let accountEmail: String?
+    let kind: DashboardProjectKind
+    let name: String
+
+    init(project: DashboardProject) {
+        accountID = project.accountID
+        accountEmail = project.accountEmail
+        kind = project.kind
+        name = project.name
+    }
+
+    var id: String {
+        "\(accountID):\(kind.rawValue):\(name)"
+    }
+
+    var displayName: String {
+        DashboardDemoMode.displayProjectName(name)
+    }
+
+    var displayAccountEmail: String? {
+        DashboardDemoMode.displayEmail(accountEmail)
     }
 }
