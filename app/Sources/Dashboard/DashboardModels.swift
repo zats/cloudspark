@@ -1,6 +1,6 @@
 import Foundation
 
-enum DashboardStatusKind {
+enum DashboardStatusKind: Equatable {
     case inProgress
     case success
     case failure
@@ -145,7 +145,7 @@ struct DashboardBuild: Encodable {
     }
 }
 
-struct DashboardProjectMetrics {
+struct DashboardProjectMetrics: Equatable {
     let requests: Int
     let errors: Int
     let averageCPUTimeMS: Double
@@ -157,12 +157,12 @@ struct DashboardPageDeployment {
     let lastReleaseAt: Date?
 }
 
-enum DashboardProjectKind {
+enum DashboardProjectKind: Equatable {
     case worker
     case page
 }
 
-struct DashboardProject {
+struct DashboardProject: Equatable {
     let accountID: String
     let accountEmail: String?
     let kind: DashboardProjectKind

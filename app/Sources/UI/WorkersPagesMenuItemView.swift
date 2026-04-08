@@ -14,6 +14,8 @@ final class WorkersPagesMenuItemView: NSView {
     private let cpuItem = MetricItemView(symbolName: "cpu")
     private let releaseItem = MetricItemView(symbolName: "clock")
     private var project: DashboardProject
+    private var isPointerHovering = false
+    private var trackingArea: NSTrackingArea?
     private let rowWidth: CGFloat = 360
     private let rowHeight: CGFloat = 64
 
@@ -139,8 +141,35 @@ final class WorkersPagesMenuItemView: NSView {
         ])
     }
 
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let trackingArea = NSTrackingArea(
+            rect: .zero,
+            options: [.activeAlways, .inVisibleRect, .mouseEnteredAndExited],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea)
+        self.trackingArea = trackingArea
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isPointerHovering = true
+        refreshHighlight()
+        super.mouseEntered(with: event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isPointerHovering = false
+        refreshHighlight()
+        super.mouseExited(with: event)
+    }
+
     func refreshHighlight(isHighlighted: Bool? = nil) {
-        let highlighted = isHighlighted ?? (enclosingMenuItem?.isHighlighted == true)
+        let highlighted = isHighlighted ?? isPointerHovering || (enclosingMenuItem?.isHighlighted == true)
         backgroundView.layer?.backgroundColor = highlighted
             ? NSColor.selectedContentBackgroundColor.cgColor
             : NSColor.clear.cgColor
@@ -177,7 +206,7 @@ final class WorkersPagesMenuItemView: NSView {
             guard project.statusKind == .inProgress else {
                 return
             }
-            statusIconView.addSymbolEffect(.rotate.byLayer, options: .repeating, animated: false)
+            statusIconView.addSymbolEffect(.rotate.byLayer, options: .repeating)
         }
     }
 

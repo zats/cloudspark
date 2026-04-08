@@ -15,8 +15,16 @@ final class StatusController: NSObject, NSMenuDelegate {
     private struct RecentBuildChange {
         let projectName: String
         let status: String
+        let statusKind: DashboardStatusKind
         let symbolName: String
         let changedAt: Date
+    }
+
+    private struct RecentBuildMenuEntry: Equatable {
+        let id: String
+        let project: DashboardProject
+        let isInProgress: Bool
+        let createdAt: Date?
     }
 
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -113,23 +121,39 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
 
     private func updateStatusIcon() {
-        let activeRecentChanges = activeRecentBuildChanges()
-        statusItem.button?.image = statusIconImage(activeRecentChanges: activeRecentChanges)
+        let referenceDate = Date()
+        let activeRecentChanges = activeRecentBuildChanges(referenceDate: referenceDate)
+        statusItem.button?.image = statusIconImage(
+            activeRecentChanges: activeRecentChanges,
+            hasInProgressBuild: latestBuildsByID.values.contains(where: \.isInProgress)
+        )
         statusItem.button?.imagePosition = .imageOnly
         statusItem.button?.title = ""
         statusItem.button?.toolTip = statusTooltip(activeRecentChanges: activeRecentChanges)
     }
 
-    private func statusIconImage(activeRecentChanges: [RecentBuildChange]) -> NSImage? {
-        guard let latestChange = activeRecentChanges.first else {
-            return NSImage(systemSymbolName: "icloud.fill", accessibilityDescription: AppBundle.name)
+    private func statusIconImage(
+        activeRecentChanges: [RecentBuildChange],
+        hasInProgressBuild: Bool
+    ) -> NSImage? {
+        let symbolName: String
+
+        if activeRecentChanges.contains(where: { $0.statusKind == .failure }) {
+            symbolName = "exclamationmark.icloud.fill"
+        } else if hasInProgressBuild {
+            symbolName = Self.inProgressStatusImageName
+        } else if let latestChange = activeRecentChanges.first {
+            symbolName = latestChange.symbolName
+        } else {
+            symbolName = "icloud.fill"
         }
-        if latestChange.symbolName == Self.inProgressStatusImageName {
+
+        if symbolName == Self.inProgressStatusImageName {
             let image = NSImage(named: Self.inProgressStatusImageName)!
             image.isTemplate = true
             return image
         }
-        return NSImage(systemSymbolName: latestChange.symbolName, accessibilityDescription: AppBundle.name)
+        return NSImage(systemSymbolName: symbolName, accessibilityDescription: AppBundle.name)
     }
 
     private func statusTooltip(activeRecentChanges: [RecentBuildChange]) -> String? {
@@ -671,55 +695,163 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
 
     private func rebuildWorkersPagesMenu() {
-        workersPagesMenu.removeAllItems()
-        highlightedWorkersPagesItem = nil
         if projects.isEmpty {
-            let emptyItem = NSMenuItem(title: sessions.isEmpty ? "Log in from Settings" : "No workers or pages", action: nil, keyEquivalent: "")
-            emptyItem.isEnabled = false
-            workersPagesMenu.addItem(emptyItem)
+            applyWorkersPagesPlaceholder(title: sessions.isEmpty ? "Log in from Settings" : "No workers or pages")
             return
         }
-
-        for project in projects {
-            let item = NSMenuItem(title: project.name, action: nil, keyEquivalent: "")
-            item.view = WorkersPagesMenuItemView(project: project)
-            workersPagesMenu.addItem(item)
-        }
+        applyWorkersPagesItems(projects)
     }
 
     private func rebuildRecentBuildsMenu(referenceDate: Date = Date()) {
-        for item in recentBuildMenuItems {
-            menu.removeItem(item)
-        }
-        recentBuildMenuItems.removeAll()
-        highlightedRecentBuildItem = nil
-
-        let items = recentBuildMenuEntries(referenceDate: referenceDate).map { entry in
-            let item = NSMenuItem(title: entry.project.name, action: nil, keyEquivalent: "")
-            item.view = WorkersPagesMenuItemView(project: entry.project)
-            return item
-        }
-
-        for (offset, item) in items.enumerated() {
-            menu.insertItem(item, at: 1 + offset)
-        }
-        recentBuildMenuItems = items
+        let entries = recentBuildMenuEntries(referenceDate: referenceDate)
+        recentBuildMenuItems = applyDiff(
+            in: menu,
+            currentItems: recentBuildMenuItems,
+            at: 1,
+            desired: entries,
+            key: \.id,
+            makeItem: makeRecentBuildMenuItem(entry:),
+            updateItem: updateRecentBuildMenuItem(item:entry:)
+        )
     }
 
-    private func recentBuildMenuEntries(referenceDate: Date) -> [(project: DashboardProject, build: DashboardBuild)] {
+    private func recentBuildMenuEntries(referenceDate: Date) -> [RecentBuildMenuEntry] {
         uniqueBuildEntries(latestBuildsByID)
             .compactMap { buildKey, build in
                 guard shouldShowInRecentBuildsMenu(build, referenceDate: referenceDate) else {
                     return nil
                 }
-                return (project: recentBuildProject(for: buildKey, build: build), build: build)
+                return RecentBuildMenuEntry(
+                    id: build.id,
+                    project: recentBuildProject(for: buildKey, build: build),
+                    isInProgress: build.isInProgress,
+                    createdAt: buildCreatedAt(build)
+                )
             }
             .sorted { lhs, rhs in
-                if lhs.build.isInProgress != rhs.build.isInProgress {
-                    return lhs.build.isInProgress && !rhs.build.isInProgress
+                if lhs.isInProgress != rhs.isInProgress {
+                    return lhs.isInProgress && !rhs.isInProgress
                 }
-                return (buildCreatedAt(lhs.build) ?? .distantPast) > (buildCreatedAt(rhs.build) ?? .distantPast)
+                return (lhs.createdAt ?? .distantPast) > (rhs.createdAt ?? .distantPast)
             }
+    }
+
+    private func applyWorkersPagesPlaceholder(title: String) {
+        let currentItems = workersPagesMenu.items
+        if currentItems.count == 1,
+           currentItems[0].representedObject as? String == title
+        {
+            return
+        }
+        workersPagesMenu.removeAllItems()
+        highlightedWorkersPagesItem = nil
+        let emptyItem = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        emptyItem.isEnabled = false
+        emptyItem.representedObject = title
+        workersPagesMenu.addItem(emptyItem)
+    }
+
+    private func applyWorkersPagesItems(_ projects: [DashboardProject]) {
+        let currentItems = workersPagesMenu.items
+        _ = applyDiff(
+            in: workersPagesMenu,
+            currentItems: currentItems,
+            at: 0,
+            desired: projects,
+            key: \.id,
+            makeItem: makeWorkersPagesMenuItem(project:),
+            updateItem: updateWorkersPagesMenuItem(item:project:)
+        )
+    }
+
+    private func makeWorkersPagesMenuItem(project: DashboardProject) -> NSMenuItem {
+        let item = NSMenuItem(title: project.name, action: nil, keyEquivalent: "")
+        item.representedObject = project
+        item.view = WorkersPagesMenuItemView(project: project)
+        return item
+    }
+
+    private func makeRecentBuildMenuItem(entry: RecentBuildMenuEntry) -> NSMenuItem {
+        let item = NSMenuItem(title: entry.project.name, action: nil, keyEquivalent: "")
+        item.representedObject = entry
+        item.view = WorkersPagesMenuItemView(project: entry.project)
+        return item
+    }
+
+    private func updateWorkersPagesMenuItem(item: NSMenuItem, project: DashboardProject) {
+        item.representedObject = project
+        item.title = project.name
+        let isHighlighted = item === highlightedWorkersPagesItem
+        (item.view as? WorkersPagesMenuItemView)?.update(project: project)
+        (item.view as? WorkersPagesMenuItemView)?.refreshHighlight(isHighlighted: isHighlighted)
+    }
+
+    private func updateRecentBuildMenuItem(item: NSMenuItem, entry: RecentBuildMenuEntry) {
+        item.representedObject = entry
+        item.title = entry.project.name
+        let isHighlighted = item === highlightedRecentBuildItem
+        (item.view as? WorkersPagesMenuItemView)?.update(project: entry.project)
+        (item.view as? WorkersPagesMenuItemView)?.refreshHighlight(isHighlighted: isHighlighted)
+    }
+
+    @discardableResult
+    private func applyDiff<Model: Equatable>(
+        in menu: NSMenu,
+        currentItems: [NSMenuItem],
+        at startIndex: Int,
+        desired: [Model],
+        key: (Model) -> String,
+        makeItem: (Model) -> NSMenuItem,
+        updateItem: (NSMenuItem, Model) -> Void
+    ) -> [NSMenuItem] {
+        var items = currentItems
+
+        for (index, model) in desired.enumerated() {
+            let modelKey = key(model)
+
+            if index < items.count,
+               let currentModel = items[index].representedObject as? Model,
+               key(currentModel) == modelKey
+            {
+                if currentModel != model {
+                    updateItem(items[index], model)
+                }
+                continue
+            }
+
+            if let existingIndex = items[index...].firstIndex(where: {
+                guard let existingModel = $0.representedObject as? Model else {
+                    return false
+                }
+                return key(existingModel) == modelKey
+            }) {
+                let item = items.remove(at: existingIndex)
+                menu.removeItem(item)
+                menu.insertItem(item, at: startIndex + index)
+                items.insert(item, at: index)
+                if let currentModel = item.representedObject as? Model, currentModel != model {
+                    updateItem(item, model)
+                }
+                continue
+            }
+
+            let item = makeItem(model)
+            menu.insertItem(item, at: startIndex + index)
+            items.insert(item, at: index)
+        }
+
+        while items.count > desired.count {
+            let removed = items.removeLast()
+            if highlightedWorkersPagesItem === removed {
+                highlightedWorkersPagesItem = nil
+            }
+            if highlightedRecentBuildItem === removed {
+                highlightedRecentBuildItem = nil
+            }
+            menu.removeItem(removed)
+        }
+
+        return items
     }
 
     private func recentBuildProject(for buildKey: String, build: DashboardBuild) -> DashboardProject {
@@ -790,6 +922,7 @@ final class StatusController: NSObject, NSMenuDelegate {
             recentBuildChangesByKey[buildKey] = RecentBuildChange(
                 projectName: projectName(for: buildKey),
                 status: status,
+                statusKind: buildStatusKind(for: build),
                 symbolName: statusIconSymbolName(for: build),
                 changedAt: now
             )
@@ -871,6 +1004,19 @@ final class StatusController: NSObject, NSMenuDelegate {
         return "icloud.fill"
     }
 
+    private func buildStatusKind(for build: DashboardBuild) -> DashboardStatusKind {
+        if build.isInProgress {
+            return .inProgress
+        }
+        if build.isFailed {
+            return .failure
+        }
+        if build.isSuccessful {
+            return .success
+        }
+        return .neutral
+    }
+
     private func shouldNotify(for build: DashboardBuild, previous: DashboardBuild?) -> Bool {
         guard let previous else {
             return false
@@ -911,6 +1057,19 @@ final class StatusController: NSObject, NSMenuDelegate {
         (nextItem?.view as? WorkersPagesMenuItemView)?.refreshHighlight(isHighlighted: true)
         highlightedRecentBuildItem = nextItem
     }
-    private let recentBuildChangeWindow: TimeInterval = 3 * 60
+
+    func menuDidClose(_ menu: NSMenu) {
+        if menu === workersPagesMenu {
+            (highlightedWorkersPagesItem?.view as? WorkersPagesMenuItemView)?.refreshHighlight(isHighlighted: false)
+            highlightedWorkersPagesItem = nil
+            return
+        }
+        guard menu === self.menu else {
+            return
+        }
+        (highlightedRecentBuildItem?.view as? WorkersPagesMenuItemView)?.refreshHighlight(isHighlighted: false)
+        highlightedRecentBuildItem = nil
+    }
+    private let recentBuildChangeWindow: TimeInterval = 5 * 60
     private let recentBuildMenuWindow: TimeInterval = 5 * 60
 }
