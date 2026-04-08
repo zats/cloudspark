@@ -24,10 +24,12 @@
     <string>public.app-category.developer-tools</string>
   <key>LSUIElement</key>
   <true/>
-  <key>SUFeedURL</key>
-  <string>https://raw.githubusercontent.com/zats/cloudspark/main/appcast.xml</string>
-  <key>SUPublicEDKey</key>
-  <string>NT9rqdaoKyMa+8E7D1PtExHRxf1CYKMNGQQfnTyMYO0=</string>
+	  <key>SUFeedURL</key>
+	  <string>https://raw.githubusercontent.com/zats/cloudspark/main/appcast.xml</string>
+	  <key>SUEnableInstallerLauncherService</key>
+	  <true/>
+	  <key>SUPublicEDKey</key>
+	  <string>NT9rqdaoKyMa+8E7D1PtExHRxf1CYKMNGQQfnTyMYO0=</string>
   <key>NSHighResolutionCapable</key>
   <true/>
   <key>NSPrincipalClass</key>
