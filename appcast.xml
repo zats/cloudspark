@@ -6,6 +6,20 @@
         <description>Most recent Cloudspark releases.</description>
         <language>en</language>
         <item>
+            <title>1.9.12</title>
+            <pubDate>Wed, 08 Apr 2026 18:57:03 -0400</pubDate>
+            <link>https://raw.githubusercontent.com/zats/cloudspark/main/appcast.xml</link>
+            <sparkle:version>12</sparkle:version>
+            <sparkle:shortVersionString>1.9.12</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[<ul>
+<li>Update appcast for 1.8.11</li>
+<li>Fix settings tab icon rendering</li>
+</ul>
+]]></description>
+            <enclosure url="https://github.com/zats/cloudspark/releases/download/v1.9.12/Cloudspark-macos.zip" length="2369419" type="application/octet-stream" sparkle:edSignature="D9Cn7VNo/ZFg939tKa1S8DTiAvw+OpYEs8T568sq0zcIeA2gAzPaMn57YPLDxPy4b6XNAGKon4vnEnwadjGQCQ=="/>
+        </item>
+        <item>
             <title>1.8.11</title>
             <pubDate>Wed, 08 Apr 2026 16:14:41 -0400</pubDate>
             <link>https://raw.githubusercontent.com/zats/cloudspark/main/appcast.xml</link>
@@ -31,20 +45,6 @@
 </ul>
 ]]></description>
             <enclosure url="https://github.com/zats/cloudspark/releases/download/v1.7.10/Cloudspark-macos.zip" length="2375687" type="application/octet-stream" sparkle:edSignature="RTVsDFCgOVY0/ubiyIy40Su657B9NOFmCdHSYwQak1GzLRH9AUjYW9ElWUAbFZD5E7cYEWfFvjbi/P5CEwZvAQ=="/>
-        </item>
-        <item>
-            <title>1.6.9</title>
-            <pubDate>Wed, 08 Apr 2026 14:55:27 -0400</pubDate>
-            <link>https://raw.githubusercontent.com/zats/cloudspark/main/appcast.xml</link>
-            <sparkle:version>9</sparkle:version>
-            <sparkle:shortVersionString>1.6.9</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[<ul>
-<li>Update appcast for 1.5.8</li>
-<li>Move dashboard sessions to a new keychain service</li>
-</ul>
-]]></description>
-            <enclosure url="https://github.com/zats/cloudspark/releases/download/v1.6.9/Cloudspark-macos.zip" length="2377528" type="application/octet-stream" sparkle:edSignature="nq9tXgKmMPgzBdz1B7zSpZYZjWxQvUBZnzjJffrAvMVo2rIYUI/H5HBRE65h/r3pZk4PkYSRvfpOzhXdX7lfDw=="/>
         </item>
     </channel>
 </rss>
