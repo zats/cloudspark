@@ -24,7 +24,6 @@ enum DashboardSessionStore {
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
             kSecAttrAccount: session.storageKey,
-            kSecAttrAccessible: kSecAttrAccessibleWhenUnlocked,
             kSecValueData: data,
         ]
 
