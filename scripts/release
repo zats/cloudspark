@@ -13,6 +13,9 @@ REMOTE="origin"
 OUTPUT_DIR=""
 DRAFT_RELEASE=0
 ALLOW_PROVISIONING_UPDATES=0
+IGNORED_STATUS_PATHS=(
+  "app/Cloudspark.xcodeproj/project.xcworkspace/xcuserdata/zats.xcuserdatad/UserInterfaceState.xcuserstate"
+)
 
 usage() {
   cat <<'EOF'
@@ -99,9 +102,23 @@ ensure_clean_worktree() {
   local status
   status="$(git status --short)"
   if [[ -n "$status" ]]; then
-    echo "Worktree must be clean before release." >&2
-    echo "$status" >&2
-    exit 1
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      local path="${line:3}"
+      local ignored=0
+      local ignored_path
+      for ignored_path in "${IGNORED_STATUS_PATHS[@]}"; do
+        if [[ "$path" == "$ignored_path" ]]; then
+          ignored=1
+          break
+        fi
+      done
+      if [[ "$ignored" -eq 0 ]]; then
+        echo "Worktree must be clean before release." >&2
+        echo "$status" >&2
+        exit 1
+      fi
+    done <<< "$status"
   fi
 }
 
