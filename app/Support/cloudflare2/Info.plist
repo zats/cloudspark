@@ -14,19 +14,23 @@
     <string>$(PRODUCT_NAME)</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
-    <key>CFBundleShortVersionString</key>
-    <string>$(MARKETING_VERSION)</string>
+  <key>CFBundleShortVersionString</key>
+  <string>$(MARKETING_VERSION).$(CURRENT_PROJECT_VERSION)</string>
     <key>CFBundleVersion</key>
     <string>$(CURRENT_PROJECT_VERSION)</string>
     <key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.developer-tools</string>
-    <key>LSUIElement</key>
-    <true/>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-    <key>NSPrincipalClass</key>
-    <string>NSApplication</string>
+  <key>LSUIElement</key>
+  <true/>
+  <key>SUFeedURL</key>
+  <string>https://raw.githubusercontent.com/zats/cloudspark/main/appcast.xml</string>
+  <key>SUPublicEDKey</key>
+  <string>NT9rqdaoKyMa+8E7D1PtExHRxf1CYKMNGQQfnTyMYO0=</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>NSPrincipalClass</key>
+  <string>NSApplication</string>
 </dict>
 </plist>

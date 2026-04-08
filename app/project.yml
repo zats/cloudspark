@@ -8,6 +8,10 @@ options:
 fileGroups:
   - path: Support/cloudflare2
     type: folder
+packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: 2.8.1
 settings:
   base:
     SWIFT_VERSION: 6.0
@@ -26,6 +30,8 @@ targets:
   Cloudspark:
     type: application
     platform: macOS
+    dependencies:
+      - package: Sparkle
     sources:
       - path: Sources
         type: syncedFolder
@@ -51,3 +57,12 @@ targets:
         RUNTIME_EXCEPTION_DEBUGGING_TOOL: NO
         RUNTIME_EXCEPTION_DISABLE_EXECUTABLE_PAGE_PROTECTION: NO
         RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION: NO
+schemes:
+  Cloudspark:
+    build:
+      targets:
+        Cloudspark: all
+    run:
+      config: Debug
+    archive:
+      config: Release

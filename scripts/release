@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_SPEC_PATH="$ROOT_DIR/app/project.yml"
 PROJECT_DIR="$ROOT_DIR/app"
 RELEASE_HELPER_PATH="$ROOT_DIR/scripts/release-direct-distribution.sh"
+APPCAST_HELPER_PATH="$ROOT_DIR/scripts/make-appcast.sh"
 ASSET_NAME="Cloudspark-macos.zip"
 
 NOTARY_PROFILE="${APPLE_NOTARY_PROFILE:-}"
@@ -15,6 +16,7 @@ DRAFT_RELEASE=0
 ALLOW_PROVISIONING_UPDATES=0
 IGNORED_STATUS_PATHS=(
   "app/Cloudspark.xcodeproj/project.xcworkspace/xcuserdata/zats.xcuserdatad/UserInterfaceState.xcuserstate"
+  "app/Cloudspark.xcodeproj/xcuserdata/zats.xcuserdatad/xcschemes/xcschememanagement.plist"
 )
 
 usage() {
@@ -170,6 +172,7 @@ require_command gh
 require_command ruby
 require_command trash
 require_command xcodegen
+require_command python3
 
 if [[ -z "$NOTARY_PROFILE" ]]; then
   echo "--notary-profile is required. Set it or export APPLE_NOTARY_PROFILE." >&2
@@ -183,6 +186,11 @@ fi
 
 if [[ ! -x "$RELEASE_HELPER_PATH" ]]; then
   echo "Missing release helper: $RELEASE_HELPER_PATH" >&2
+  exit 1
+fi
+
+if [[ ! -x "$APPCAST_HELPER_PATH" ]]; then
+  echo "Missing appcast helper: $APPCAST_HELPER_PATH" >&2
   exit 1
 fi
 
@@ -294,9 +302,17 @@ fi
 echo "Creating GitHub release $TAG"
 gh release create "${RELEASE_ARGS[@]}"
 
+echo "Generating appcast for $TAG"
+"$APPCAST_HELPER_PATH" "$RELEASE_OUTPUT_DIR/$ASSET_NAME" "$VERSION" "$TAG" "$NOTES_FILE"
+
+git add "$ROOT_DIR/appcast.xml"
+git commit -m "Update appcast for $VERSION"
+git push "$REMOTE" "HEAD:refs/heads/$BRANCH"
+
 echo
 echo "Version: $VERSION"
 echo "Branch: $BRANCH"
 echo "Tag: $TAG"
 echo "Artifact: $RELEASE_OUTPUT_DIR/$ASSET_NAME"
 echo "Notes: $NOTES_FILE"
+echo "Appcast: $ROOT_DIR/appcast.xml"

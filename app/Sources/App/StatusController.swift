@@ -37,6 +37,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     private let summarySectionSeparatorItem = NSMenuItem.separator()
     private let workersPagesItem = NSMenuItem(title: "Workers", action: nil, keyEquivalent: "")
     private let refreshItem = NSMenuItem(title: "Refresh", action: #selector(refreshBuilds), keyEquivalent: "")
+    private let checkForUpdatesItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
     private let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: "")
     private let quitItem = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "")
     private let fractionalDateFormatter: ISO8601DateFormatter = {
@@ -72,6 +73,12 @@ final class StatusController: NSObject, NSMenuDelegate {
     private var recentBuildChangesByKey: [String: RecentBuildChange] = [:]
     private var recentBuildMenuItems: [NSMenuItem] = []
     private var favoriteProjectIDs = AppPreferences.favoriteProjectIDs
+    private let updateController: UpdateControlling
+
+    init(updateController: UpdateControlling) {
+        self.updateController = updateController
+        super.init()
+    }
 
     func start() {
         sessions = (try? DashboardSessionStore.loadAll()) ?? []
@@ -99,10 +106,12 @@ final class StatusController: NSObject, NSMenuDelegate {
         workersPagesMenu.delegate = self
         menu.addItem(workersPagesItem)
 
-        for item in [refreshItem, settingsItem] {
+        for item in [refreshItem, checkForUpdatesItem, settingsItem] {
             item.target = self
             menu.addItem(item)
         }
+
+        checkForUpdatesItem.isEnabled = updateController.isAvailable
 
         menu.addItem(NSMenuItem.separator())
         quitItem.target = self
@@ -250,6 +259,11 @@ final class StatusController: NSObject, NSMenuDelegate {
         Task { @MainActor in
             await refreshAllEndpoints(silent: false)
         }
+    }
+
+    @objc
+    private func checkForUpdates() {
+        updateController.checkForUpdates(nil)
     }
 
     private func refreshAllEndpoints(forceLogin: Bool = false, silent: Bool) async {

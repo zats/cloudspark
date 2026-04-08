@@ -15,11 +15,12 @@ enum CloudsparkApp {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let updateController: UpdateControlling = makeUpdateController()
     private var statusController: StatusController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         BuildNotificationManager.configure()
-        statusController = StatusController()
+        statusController = StatusController(updateController: updateController)
         statusController?.start()
     }
 }
