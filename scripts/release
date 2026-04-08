@@ -91,8 +91,8 @@ update_project_spec_versions() {
     path, marketing_version, build_number = ARGV
     content = File.read(path)
     original = content.dup
-    content.sub!(/^(\s*MARKETING_VERSION:\s*).*$/"\1#{marketing_version}"/) || abort("Failed to update MARKETING_VERSION")
-    content.sub!(/^(\s*CURRENT_PROJECT_VERSION:\s*).*$/"\1#{build_number}"/) || abort("Failed to update CURRENT_PROJECT_VERSION")
+    content.sub!(/^(\s*MARKETING_VERSION:\s*).*$/, "\\1#{marketing_version}") || abort("Failed to update MARKETING_VERSION")
+    content.sub!(/^(\s*CURRENT_PROJECT_VERSION:\s*).*$/, "\\1#{build_number}") || abort("Failed to update CURRENT_PROJECT_VERSION")
     abort("No changes written to #{path}") if content == original
     File.write(path, content)
   ' "$PROJECT_SPEC_PATH" "$marketing_version" "$build_number"
