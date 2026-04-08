@@ -85,7 +85,6 @@ enum DashboardSessionStore {
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
             kSecReturnAttributes: true,
-            kSecReturnData: true,
             kSecMatchLimit: kSecMatchLimitAll,
         ]
 
@@ -99,16 +98,42 @@ enum DashboardSessionStore {
             decoder.dateDecodingStrategy = .iso8601
             if let rows = item as? [[CFString: Any]] {
                 return try rows.compactMap { row in
-                    guard let data = row[kSecValueData] as? Data else { return nil }
+                    guard let account = row[kSecAttrAccount] as? String else { return nil }
+                    let data = try loadSessionData(service: service, account: account)
                     return try decoder.decode(DashboardSession.self, from: data)
                 }
             }
-            if let row = item as? [CFString: Any], let data = row[kSecValueData] as? Data {
+            if let row = item as? [CFString: Any], let account = row[kSecAttrAccount] as? String {
+                let data = try loadSessionData(service: service, account: account)
                 return [try decoder.decode(DashboardSession.self, from: data)]
             }
             throw DashboardError.invalidSessionData
         default:
             throw DashboardError.keychainOperation("load", status)
+        }
+    }
+
+    private static func loadSessionData(service: String, account: String) throws -> Data {
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: account,
+            kSecReturnData: true,
+            kSecMatchLimit: kSecMatchLimitOne,
+        ]
+
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        switch status {
+        case errSecSuccess:
+            guard let data = item as? Data else {
+                throw DashboardError.invalidSessionData
+            }
+            return data
+        case errSecItemNotFound:
+            throw DashboardError.invalidSessionData
+        default:
+            throw DashboardError.keychainOperation("load-data", status)
         }
     }
 
