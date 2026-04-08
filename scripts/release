@@ -25,6 +25,8 @@ usage() {
 Usage:
   scripts/release [options]
 
+This script may be used for no-op release pipeline validation.
+
 Options:
   --notary-profile NAME         Keychain profile for xcrun notarytool.
   --output-dir PATH             Where to write final artifacts. Default: temp dir.
