@@ -22,7 +22,6 @@ enum DashboardSessionStore {
 
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
-            kSecUseDataProtectionKeychain: true,
             kSecAttrService: service,
             kSecAttrAccount: session.storageKey,
             kSecAttrAccessible: kSecAttrAccessibleWhenUnlocked,
@@ -38,7 +37,6 @@ enum DashboardSessionStore {
     static func clear() throws {
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
-            kSecUseDataProtectionKeychain: true,
             kSecAttrService: service,
         ]
 
@@ -51,7 +49,6 @@ enum DashboardSessionStore {
     static func clear(storageKey: String) throws {
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
-            kSecUseDataProtectionKeychain: true,
             kSecAttrService: service,
             kSecAttrAccount: storageKey,
         ]
@@ -76,7 +73,6 @@ enum DashboardSessionStore {
     private static func loadSessions(service: String) throws -> [DashboardSession] {
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
-            kSecUseDataProtectionKeychain: true,
             kSecAttrService: service,
             kSecReturnData: true,
             kSecMatchLimit: kSecMatchLimitAll,
