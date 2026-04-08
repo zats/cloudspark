@@ -77,24 +77,24 @@ cleanup() {
 }
 
 developer_id_identity() {
-  local cert_prefix="$WORK_DIR/signing-cert"
-  local cert_hash=""
-  if codesign -d --extract-certificates "$cert_prefix" "$APP_PATH" >/dev/null 2>&1 && [[ -f "${cert_prefix}0" ]]; then
-    cert_hash="$(
-      openssl x509 -inform DER -in "${cert_prefix}0" -noout -fingerprint -sha1 2>/dev/null \
-        | awk -F= '{ gsub(":", "", $2); print toupper($2) }'
-    )"
-  fi
-
-  if [[ -n "$cert_hash" ]]; then
-    printf '%s\n' "$cert_hash"
-    return 0
-  fi
-
   local identity_name=""
   if [[ -n "${CLOUDFLARE2_CODESIGN_IDENTITY:-}" ]]; then
     identity_name="$CLOUDFLARE2_CODESIGN_IDENTITY"
   else
+    local cert_prefix="$WORK_DIR/signing-cert"
+    local cert_hash=""
+    if codesign -d --extract-certificates "$cert_prefix" "$APP_PATH" >/dev/null 2>&1 && [[ -f "${cert_prefix}0" ]]; then
+      cert_hash="$(
+        openssl x509 -inform DER -in "${cert_prefix}0" -noout -fingerprint -sha1 2>/dev/null \
+          | awk -F= '{ gsub(":", "", $2); print toupper($2) }'
+      )"
+    fi
+
+    if [[ -n "$cert_hash" ]]; then
+      printf '%s\n' "$cert_hash"
+      return 0
+    fi
+
     identity_name="$(
       codesign -dvv "$APP_PATH" 2>&1 \
         | awk -F= '/^Authority=Developer ID Application:/ {print $2; exit}'
