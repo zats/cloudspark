@@ -76,6 +76,45 @@ cleanup() {
   fi
 }
 
+developer_id_identity() {
+  if [[ -n "${CLOUDFLARE2_CODESIGN_IDENTITY:-}" ]]; then
+    printf '%s\n' "$CLOUDFLARE2_CODESIGN_IDENTITY"
+    return 0
+  fi
+
+  codesign -dvv "$APP_PATH" 2>&1 \
+    | awk -F= '/^Authority=Developer ID Application:/ {print $2; exit}'
+}
+
+resign_sparkle_bundle() {
+  local identity="$1"
+  local sparkle_path="$APP_PATH/Contents/Frameworks/Sparkle.framework"
+
+  [[ -d "$sparkle_path" ]] || return 0
+
+  echo "Re-signing Sparkle"
+
+  local targets=(
+    "$sparkle_path/Versions/B/Sparkle"
+    "$sparkle_path/Versions/B/Autoupdate"
+    "$sparkle_path/Versions/B/Updater.app/Contents/MacOS/Updater"
+    "$sparkle_path/Versions/B/Updater.app"
+    "$sparkle_path/Versions/B/XPCServices/Downloader.xpc/Contents/MacOS/Downloader"
+    "$sparkle_path/Versions/B/XPCServices/Downloader.xpc"
+    "$sparkle_path/Versions/B/XPCServices/Installer.xpc/Contents/MacOS/Installer"
+    "$sparkle_path/Versions/B/XPCServices/Installer.xpc"
+    "$sparkle_path/Versions/B"
+    "$sparkle_path"
+    "$APP_PATH"
+  )
+
+  local target
+  for target in "${targets[@]}"; do
+    [[ -e "$target" ]] || continue
+    codesign --force --timestamp --options runtime --sign "$identity" "$target"
+  done
+}
+
 submit_for_notarization() {
   local attempt=1
   local stderr_path="$WORK_DIR/notary-submit.stderr"
@@ -274,6 +313,14 @@ if [[ ! -d "$APP_PATH" ]]; then
   echo "Archive did not produce app bundle: $APP_PATH" >&2
   exit 1
 fi
+
+SIGNING_IDENTITY="$(developer_id_identity)"
+if [[ -z "$SIGNING_IDENTITY" ]]; then
+  echo "Unable to determine Developer ID signing identity for Sparkle re-signing." >&2
+  exit 1
+fi
+
+resign_sparkle_bundle "$SIGNING_IDENTITY"
 
 echo "Verifying code signature"
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
