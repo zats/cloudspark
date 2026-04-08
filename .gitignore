@@ -6,3 +6,5 @@
 Cloudflare2.xcodeproj/
 www/node_modules/
 www/dist/
+app/Cloudspark.xcodeproj/**/xcuserdata/
+app/Cloudspark.xcodeproj/**/xcschememanagement.plist

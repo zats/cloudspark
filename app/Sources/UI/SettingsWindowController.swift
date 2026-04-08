@@ -166,12 +166,31 @@ private final class SettingsTabsViewController: NSTabViewController {
     }
 
     private func tabImage(systemName: String) -> NSImage? {
-        let image = NSImage(
+        guard let symbol = NSImage(
             systemSymbolName: systemName,
             accessibilityDescription: nil
-        )?.withSymbolConfiguration(tabIconConfiguration)
-        image?.isTemplate = true
-        image?.size = NSSize(width: tabIconSize, height: tabIconSize)
+        )?.withSymbolConfiguration(tabIconConfiguration) else {
+            return nil
+        }
+
+        let canvasSize = NSSize(width: tabIconSize, height: tabIconSize)
+        let image = NSImage(size: canvasSize)
+        image.lockFocus()
+        NSGraphicsContext.current?.imageInterpolation = .high
+
+        let sourceSize = symbol.size
+        let scale = min(canvasSize.width / sourceSize.width, canvasSize.height / sourceSize.height)
+        let drawSize = NSSize(width: sourceSize.width * scale, height: sourceSize.height * scale)
+        let drawRect = NSRect(
+            x: (canvasSize.width - drawSize.width) / 2,
+            y: (canvasSize.height - drawSize.height) / 2,
+            width: drawSize.width,
+            height: drawSize.height
+        )
+        symbol.draw(in: drawRect)
+        image.unlockFocus()
+
+        image.isTemplate = true
         return image
     }
 }
