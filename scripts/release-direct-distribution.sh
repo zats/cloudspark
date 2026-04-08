@@ -139,13 +139,17 @@ resign_sparkle_bundle() {
   local target
   for target in "${targets[@]}"; do
     [[ -e "$target" ]] || continue
-    codesign \
-      --force \
-      --timestamp \
-      --options runtime \
-      --preserve-metadata=identifier,entitlements,requirements,flags \
-      --sign "$identity" \
-      "$target"
+    if [[ "$target" == "$APP_PATH" ]]; then
+      codesign \
+        --force \
+        --timestamp \
+        --options runtime \
+        --preserve-metadata=identifier,entitlements,requirements,flags \
+        --sign "$identity" \
+        "$target"
+    else
+      codesign --force --timestamp --options runtime --sign "$identity" "$target"
+    fi
   done
 }
 
