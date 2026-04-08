@@ -77,6 +77,20 @@ cleanup() {
 }
 
 developer_id_identity() {
+  local cert_prefix="$WORK_DIR/signing-cert"
+  local cert_hash=""
+  if codesign -d --extract-certificates "$cert_prefix" "$APP_PATH" >/dev/null 2>&1 && [[ -f "${cert_prefix}0" ]]; then
+    cert_hash="$(
+      openssl x509 -inform DER -in "${cert_prefix}0" -noout -fingerprint -sha1 2>/dev/null \
+        | awk -F= '{ gsub(":", "", $2); print toupper($2) }'
+    )"
+  fi
+
+  if [[ -n "$cert_hash" ]]; then
+    printf '%s\n' "$cert_hash"
+    return 0
+  fi
+
   local identity_name=""
   if [[ -n "${CLOUDFLARE2_CODESIGN_IDENTITY:-}" ]]; then
     identity_name="$CLOUDFLARE2_CODESIGN_IDENTITY"
@@ -89,9 +103,14 @@ developer_id_identity() {
 
   [[ -n "$identity_name" ]] || return 1
 
+  if [[ "$identity_name" =~ ^[A-Fa-f0-9]{40}$ ]]; then
+    printf '%s\n' "${identity_name^^}"
+    return 0
+  fi
+
   security find-identity -v -p codesigning \
     | awk -v identity="$identity_name" '
-      $0 ~ identity { gsub(/"/, "", $2); print $2; exit }
+      index($0, "\"" identity "\"") > 0 { gsub(/"/, "", $2); print $2; exit }
     '
 }
 
@@ -222,7 +241,7 @@ require_command ditto
 require_command trash
 require_command codesign
 require_command spctl
-require_command xcrun
+require_command openssl
 
 if [[ -z "$NOTARY_PROFILE" ]]; then
   echo "--notary-profile is required. Set it or export APPLE_NOTARY_PROFILE." >&2
