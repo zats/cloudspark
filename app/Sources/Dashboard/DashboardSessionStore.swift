@@ -2,7 +2,7 @@ import Foundation
 import Security
 
 enum DashboardSessionStore {
-    private static let service = "\(AppBundle.bundleID).dashboard"
+    private static let service = "\(AppBundle.bundleID).dashboard.v2"
     private static let accessGroup = currentAccessGroup()
 
     static func load() throws -> DashboardSession? {
