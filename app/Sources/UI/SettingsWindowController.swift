@@ -101,6 +101,7 @@ private final class SettingsTabsViewController: NSTabViewController {
     let generalViewController = GeneralSettingsViewController()
     let accountsViewController = AccountsSettingsViewController()
     var onSelectTab: ((SettingsWindowController.Tab) -> Void)?
+    private let tabIconConfiguration = NSImage.SymbolConfiguration(pointSize: 20, weight: .regular)
 
     var onLogin: (() -> Void)? {
         didSet { accountsViewController.onLogin = onLogin }
@@ -124,11 +125,11 @@ private final class SettingsTabsViewController: NSTabViewController {
 
         let generalItem = NSTabViewItem(viewController: generalViewController)
         generalItem.label = "General"
-        generalItem.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: nil)
+        generalItem.image = tabImage(systemName: "gearshape")
 
         let accountsItem = NSTabViewItem(viewController: accountsViewController)
         accountsItem.label = "Accounts"
-        accountsItem.image = NSImage(systemSymbolName: "person.crop.circle", accessibilityDescription: nil)
+        accountsItem.image = tabImage(systemName: "person.crop.circle")
 
         addTabViewItem(generalItem)
         addTabViewItem(accountsItem)
@@ -160,6 +161,16 @@ private final class SettingsTabsViewController: NSTabViewController {
 
     override func tabView(_ tabView: NSTabView, didSelect tabViewItem: NSTabViewItem?) {
         onSelectTab?(selectedTabViewItemIndex == 0 ? .general : .accounts)
+    }
+
+    private func tabImage(systemName: String) -> NSImage? {
+        let image = NSImage(
+            systemSymbolName: systemName,
+            accessibilityDescription: nil
+        )?.withSymbolConfiguration(tabIconConfiguration)
+        image?.isTemplate = true
+        image?.size = NSSize(width: 20, height: 20)
+        return image
     }
 }
 
