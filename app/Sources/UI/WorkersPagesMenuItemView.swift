@@ -6,7 +6,9 @@ final class WorkersPagesMenuItemView: NSView {
     private let iconView = NSImageView()
     private let nameLabel = NSTextField(labelWithString: "")
     private let subtitleLabel = NSTextField(labelWithString: "")
+    private let accessoryStack = NSStackView()
     private let statusIconView = NSImageView()
+    private let favoriteButton = NSButton()
     private let metricsStack = NSStackView()
     private let accountLabel = NSTextField(labelWithString: "")
     private let requestsItem = MetricItemView(symbolName: "chart.xyaxis.line")
@@ -15,19 +17,24 @@ final class WorkersPagesMenuItemView: NSView {
     private let releaseItem = MetricItemView(symbolName: "clock")
     private var project: DashboardProject
     private var onClick: (() -> Void)?
+    private var onToggleFavorite: (() -> Void)?
     private var handledClickInCurrentGesture = false
     private var isPointerHovering = false
+    private var isFavorite = false
+    private var isMenuHighlighted = false
     private var trackingArea: NSTrackingArea?
     private let rowWidth: CGFloat = 360
     private let rowHeight: CGFloat = 64
 
-    init(project: DashboardProject, onClick: (() -> Void)? = nil) {
+    init(project: DashboardProject, isFavorite: Bool = false, onClick: (() -> Void)? = nil, onToggleFavorite: (() -> Void)? = nil) {
         self.project = project
+        self.isFavorite = isFavorite
         self.onClick = onClick
+        self.onToggleFavorite = onToggleFavorite
         super.init(frame: NSRect(x: 0, y: 0, width: rowWidth, height: rowHeight))
         translatesAutoresizingMaskIntoConstraints = false
         setup()
-        update(project: project, onClick: onClick)
+        update(project: project, isFavorite: isFavorite, onClick: onClick, onToggleFavorite: onToggleFavorite)
     }
 
     @available(*, unavailable)
@@ -35,9 +42,11 @@ final class WorkersPagesMenuItemView: NSView {
         fatalError()
     }
 
-    func update(project: DashboardProject, onClick: (() -> Void)? = nil) {
+    func update(project: DashboardProject, isFavorite: Bool = false, onClick: (() -> Void)? = nil, onToggleFavorite: (() -> Void)? = nil) {
         self.project = project
+        self.isFavorite = isFavorite
         self.onClick = onClick
+        self.onToggleFavorite = onToggleFavorite
         let symbolName = switch project.kind {
         case .worker: "gearshape"
         case .page: "richtext.page"
@@ -62,6 +71,9 @@ final class WorkersPagesMenuItemView: NSView {
         releaseItem.update(text: project.lastReleaseAt.map(formatRelativeDate))
         accountLabel.stringValue = project.displayAccountEmail ?? ""
         accountLabel.isHidden = (project.displayAccountEmail?.isEmpty ?? true)
+        favoriteButton.image = favoriteImage(isFavorite: isFavorite)
+        favoriteButton.isHidden = !isFavorite && !isPointerHovering
+        favoriteButton.contentTintColor = favoriteTintColor(highlighted: false)
 
         let hasVisibleMetrics = [requestsItem, errorsItem, cpuItem, releaseItem].contains { !$0.isHidden }
         metricsStack.isHidden = !hasVisibleMetrics
@@ -115,8 +127,27 @@ final class WorkersPagesMenuItemView: NSView {
 
         statusIconView.translatesAutoresizingMaskIntoConstraints = false
         statusIconView.setContentHuggingPriority(.required, for: .horizontal)
-        addSubview(statusIconView)
+        statusIconView.setContentCompressionResistancePriority(.required, for: .horizontal)
 
+        accessoryStack.orientation = .horizontal
+        accessoryStack.alignment = .centerY
+        accessoryStack.spacing = 6
+        accessoryStack.translatesAutoresizingMaskIntoConstraints = false
+        accessoryStack.setContentHuggingPriority(.required, for: .horizontal)
+        accessoryStack.setContentCompressionResistancePriority(.required, for: .horizontal)
+        accessoryStack.addArrangedSubview(favoriteButton)
+        accessoryStack.addArrangedSubview(statusIconView)
+        addSubview(accessoryStack)
+
+        favoriteButton.isBordered = false
+        favoriteButton.imagePosition = .imageOnly
+        favoriteButton.bezelStyle = .regularSquare
+        favoriteButton.setButtonType(.momentaryChange)
+        favoriteButton.focusRingType = .none
+        favoriteButton.target = self
+        favoriteButton.action = #selector(toggleFavorite)
+        favoriteButton.translatesAutoresizingMaskIntoConstraints = false
+        favoriteButton.isHidden = true
         NSLayoutConstraint.activate([
             widthAnchor.constraint(equalToConstant: rowWidth),
             heightAnchor.constraint(equalToConstant: rowHeight),
@@ -131,17 +162,21 @@ final class WorkersPagesMenuItemView: NSView {
             iconView.widthAnchor.constraint(equalToConstant: 18),
             iconView.heightAnchor.constraint(equalToConstant: 18),
 
-            statusIconView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            statusIconView.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+            favoriteButton.widthAnchor.constraint(equalToConstant: 18),
+            favoriteButton.heightAnchor.constraint(equalToConstant: 18),
+
             statusIconView.widthAnchor.constraint(equalToConstant: 14),
             statusIconView.heightAnchor.constraint(equalToConstant: 14),
+
+            accessoryStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            accessoryStack.topAnchor.constraint(equalTo: topAnchor, constant: 10),
 
             accountLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             accountLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
             accountLabel.leadingAnchor.constraint(greaterThanOrEqualTo: labels.leadingAnchor, constant: 80),
 
             labels.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 10),
-            labels.trailingAnchor.constraint(lessThanOrEqualTo: accountLabel.leadingAnchor, constant: -10),
+            labels.trailingAnchor.constraint(lessThanOrEqualTo: accessoryStack.leadingAnchor, constant: -10),
             labels.topAnchor.constraint(equalTo: topAnchor, constant: 8),
             labels.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -10),
         ])
@@ -175,12 +210,17 @@ final class WorkersPagesMenuItemView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if !favoriteButton.isHidden, favoriteButton.frame.contains(point) {
+            handledClickInCurrentGesture = false
+            super.mouseDown(with: event)
+            return
+        }
         guard let onClick else {
             handledClickInCurrentGesture = false
             super.mouseDown(with: event)
             return
         }
-        let point = convert(event.locationInWindow, from: nil)
         guard bounds.contains(point) else {
             handledClickInCurrentGesture = false
             super.mouseDown(with: event)
@@ -196,11 +236,15 @@ final class WorkersPagesMenuItemView: NSView {
             handledClickInCurrentGesture = false
             return
         }
+        let point = convert(event.locationInWindow, from: nil)
+        if !favoriteButton.isHidden, favoriteButton.frame.contains(point) {
+            super.mouseUp(with: event)
+            return
+        }
         guard let onClick else {
             super.mouseUp(with: event)
             return
         }
-        let point = convert(event.locationInWindow, from: nil)
         guard bounds.contains(point) else {
             super.mouseUp(with: event)
             return
@@ -217,8 +261,23 @@ final class WorkersPagesMenuItemView: NSView {
         addCursorRect(bounds, cursor: .pointingHand)
     }
 
+    func syncPointerHoverState() {
+        refreshHighlight()
+    }
+
+    func resetInteractionState() {
+        isPointerHovering = false
+        isMenuHighlighted = false
+        refreshHighlight()
+    }
+
     func refreshHighlight(isHighlighted: Bool? = nil) {
-        let highlighted = isHighlighted ?? isPointerHovering || (enclosingMenuItem?.isHighlighted == true)
+        if let isHighlighted {
+            isMenuHighlighted = isHighlighted
+        }
+        isPointerHovering = isPointerInsideBounds()
+        let highlighted = isPointerHovering || isMenuHighlighted
+        favoriteButton.isHidden = !isFavorite && !highlighted
         backgroundView.layer?.backgroundColor = highlighted
             ? NSColor.selectedContentBackgroundColor.cgColor
             : NSColor.clear.cgColor
@@ -229,10 +288,40 @@ final class WorkersPagesMenuItemView: NSView {
         subtitleLabel.textColor = secondary
         accountLabel.textColor = tertiary
         iconView.contentTintColor = secondary
+        favoriteButton.contentTintColor = favoriteTintColor(highlighted: highlighted)
         statusIconView.contentTintColor = highlighted
             ? NSColor.selectedMenuItemTextColor
             : statusColor(for: project.statusText)
         [requestsItem, errorsItem, cpuItem, releaseItem].forEach { $0.apply(primary: secondary, highlighted: highlighted) }
+    }
+
+    private func isPointerInsideBounds() -> Bool {
+        guard let window else {
+            return false
+        }
+        let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        return bounds.contains(point)
+    }
+
+    @objc
+    private func toggleFavorite() {
+        onToggleFavorite?()
+    }
+
+    private func favoriteImage(isFavorite: Bool) -> NSImage? {
+        let symbolName = isFavorite ? "star.fill" : "star"
+        let configuration = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
+        let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: isFavorite ? "Unfavorite" : "Favorite")?
+            .withSymbolConfiguration(configuration)
+        image?.isTemplate = !isFavorite
+        return image
+    }
+
+    private func favoriteTintColor(highlighted: Bool) -> NSColor {
+        if isFavorite {
+            return .systemYellow
+        }
+        return highlighted ? .selectedMenuItemTextColor : .secondaryLabelColor
     }
 
     private func statusImage(for status: String?) -> NSImage? {

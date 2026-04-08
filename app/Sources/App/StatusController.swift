@@ -56,9 +56,6 @@ final class StatusController: NSObject, NSMenuDelegate {
     private var endpointTimers: [Endpoint: Timer] = [:]
     private var endpointTasks: [Endpoint: Task<Void, Never>] = [:]
     private var summaryTimer: Timer?
-    private weak var highlightedWorkersPagesItem: NSMenuItem?
-    private weak var highlightedRecentBuildItem: NSMenuItem?
-
     private var overviewProjectsByID: [String: DashboardProject] = [:]
     private var latestBuildsByID: [String: DashboardBuild] = [:]
     private var workerMetricsByID: [String: DashboardProjectMetrics] = [:]
@@ -74,6 +71,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     private var didRequestStartupLogin = false
     private var recentBuildChangesByKey: [String: RecentBuildChange] = [:]
     private var recentBuildMenuItems: [NSMenuItem] = []
+    private var favoriteProjectIDs = AppPreferences.favoriteProjectIDs
 
     func start() {
         sessions = (try? DashboardSessionStore.loadAll()) ?? []
@@ -233,7 +231,6 @@ final class StatusController: NSObject, NSMenuDelegate {
         hasLoadedWorkerMetrics = false
         hasLoadedPageDeployments = false
         lastRefreshedAt = nil
-        highlightedWorkersPagesItem = nil
         recentBuildChangesByKey = [:]
         rebuildWorkersPagesMenu()
         updateStatusIcon()
@@ -660,7 +657,10 @@ final class StatusController: NSObject, NSMenuDelegate {
                 }
             }
             .sorted {
-                $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+                if isFavorite($0) != isFavorite($1) {
+                    return isFavorite($0)
+                }
+                return $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
             }
 
         rebuildWorkersPagesMenu()
@@ -753,7 +753,10 @@ final class StatusController: NSObject, NSMenuDelegate {
 
         return entriesByID.values
             .sorted { lhs, rhs in
-                (lhs.changedAt ?? .distantPast) > (rhs.changedAt ?? .distantPast)
+                if isFavorite(lhs.project) != isFavorite(rhs.project) {
+                    return isFavorite(lhs.project)
+                }
+                return (lhs.changedAt ?? .distantPast) > (rhs.changedAt ?? .distantPast)
             }
     }
 
@@ -814,7 +817,6 @@ final class StatusController: NSObject, NSMenuDelegate {
             return
         }
         workersPagesMenu.removeAllItems()
-        highlightedWorkersPagesItem = nil
         let emptyItem = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         emptyItem.isEnabled = false
         emptyItem.representedObject = title
@@ -837,31 +839,49 @@ final class StatusController: NSObject, NSMenuDelegate {
     private func makeWorkersPagesMenuItem(project: DashboardProject) -> NSMenuItem {
         let item = NSMenuItem(title: project.displayName, action: nil, keyEquivalent: "")
         item.representedObject = project
-        item.view = WorkersPagesMenuItemView(project: project, onClick: openURLAction(project.destinationURL))
+        item.view = WorkersPagesMenuItemView(
+            project: project,
+            isFavorite: isFavorite(project),
+            onClick: openURLAction(project.destinationURL),
+            onToggleFavorite: toggleFavoriteAction(project)
+        )
         return item
     }
 
     private func makeRecentBuildMenuItem(entry: RecentBuildMenuEntry) -> NSMenuItem {
         let item = NSMenuItem(title: entry.project.displayName, action: nil, keyEquivalent: "")
         item.representedObject = entry
-        item.view = WorkersPagesMenuItemView(project: entry.project, onClick: openURLAction(entry.project.destinationURL))
+        item.view = WorkersPagesMenuItemView(
+            project: entry.project,
+            isFavorite: isFavorite(entry.project),
+            onClick: openURLAction(entry.project.destinationURL),
+            onToggleFavorite: toggleFavoriteAction(entry.project)
+        )
         return item
     }
 
     private func updateWorkersPagesMenuItem(item: NSMenuItem, project: DashboardProject) {
         item.representedObject = project
         item.title = project.displayName
-        let isHighlighted = item === highlightedWorkersPagesItem
-        (item.view as? WorkersPagesMenuItemView)?.update(project: project, onClick: openURLAction(project.destinationURL))
-        (item.view as? WorkersPagesMenuItemView)?.refreshHighlight(isHighlighted: isHighlighted)
+        (item.view as? WorkersPagesMenuItemView)?.update(
+            project: project,
+            isFavorite: isFavorite(project),
+            onClick: openURLAction(project.destinationURL),
+            onToggleFavorite: toggleFavoriteAction(project)
+        )
+        (item.view as? WorkersPagesMenuItemView)?.syncPointerHoverState()
     }
 
     private func updateRecentBuildMenuItem(item: NSMenuItem, entry: RecentBuildMenuEntry) {
         item.representedObject = entry
         item.title = entry.project.displayName
-        let isHighlighted = item === highlightedRecentBuildItem
-        (item.view as? WorkersPagesMenuItemView)?.update(project: entry.project, onClick: openURLAction(entry.project.destinationURL))
-        (item.view as? WorkersPagesMenuItemView)?.refreshHighlight(isHighlighted: isHighlighted)
+        (item.view as? WorkersPagesMenuItemView)?.update(
+            project: entry.project,
+            isFavorite: isFavorite(entry.project),
+            onClick: openURLAction(entry.project.destinationURL),
+            onToggleFavorite: toggleFavoriteAction(entry.project)
+        )
+        (item.view as? WorkersPagesMenuItemView)?.syncPointerHoverState()
     }
 
     @discardableResult
@@ -912,12 +932,6 @@ final class StatusController: NSObject, NSMenuDelegate {
 
         while items.count > desired.count {
             let removed = items.removeLast()
-            if highlightedWorkersPagesItem === removed {
-                highlightedWorkersPagesItem = nil
-            }
-            if highlightedRecentBuildItem === removed {
-                highlightedRecentBuildItem = nil
-            }
             menu.removeItem(removed)
         }
 
@@ -959,6 +973,56 @@ final class StatusController: NSObject, NSMenuDelegate {
             self?.menu.cancelTracking()
             self?.workersPagesMenu.cancelTracking()
             NSWorkspace.shared.open(url)
+        }
+    }
+
+    private func toggleFavoriteAction(_ project: DashboardProject) -> (() -> Void) {
+        { [weak self] in
+            self?.toggleFavorite(for: project)
+        }
+    }
+
+    private func toggleFavorite(for project: DashboardProject) {
+        if favoriteProjectIDs.contains(project.id) {
+            favoriteProjectIDs.remove(project.id)
+        } else {
+            favoriteProjectIDs.insert(project.id)
+        }
+        AppPreferences.setFavoriteProjectIDs(favoriteProjectIDs)
+        clearMenuInteractionState()
+        rebuildProjectsFromSnapshots()
+        rebuildRecentBuildsMenu()
+        refreshVisibleMenuItems()
+        DispatchQueue.main.async { [weak self] in
+            self?.refreshVisibleMenuItems()
+        }
+    }
+
+    private func isFavorite(_ project: DashboardProject) -> Bool {
+        favoriteProjectIDs.contains(project.id)
+    }
+
+    private func clearMenuInteractionState() {
+        for item in workersPagesMenu.items {
+            (item.view as? WorkersPagesMenuItemView)?.resetInteractionState()
+        }
+        for item in recentBuildMenuItems {
+            (item.view as? WorkersPagesMenuItemView)?.resetInteractionState()
+        }
+    }
+
+    private func refreshVisibleMenuItems() {
+        for item in workersPagesMenu.items {
+            guard let project = item.representedObject as? DashboardProject else {
+                continue
+            }
+            updateWorkersPagesMenuItem(item: item, project: project)
+        }
+        for item in recentBuildMenuItems {
+            guard let entry = item.representedObject as? RecentBuildMenuEntry else {
+                continue
+            }
+            updateRecentBuildMenuItem(item: item, entry: entry)
         }
     }
 
@@ -1262,38 +1326,17 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
 
     func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {
-        if menu === workersPagesMenu {
-            if highlightedWorkersPagesItem === item {
-                return
-            }
-            (highlightedWorkersPagesItem?.view as? WorkersPagesMenuItemView)?.refreshHighlight(isHighlighted: false)
-            (item?.view as? WorkersPagesMenuItemView)?.refreshHighlight(isHighlighted: true)
-            highlightedWorkersPagesItem = item
+        guard menu === workersPagesMenu || menu === self.menu else {
             return
         }
-        guard menu === self.menu else {
-            return
-        }
-        let nextItem = recentBuildMenuItems.contains { $0 === item } ? item : nil
-        if highlightedRecentBuildItem === nextItem {
-            return
-        }
-        (highlightedRecentBuildItem?.view as? WorkersPagesMenuItemView)?.refreshHighlight(isHighlighted: false)
-        (nextItem?.view as? WorkersPagesMenuItemView)?.refreshHighlight(isHighlighted: true)
-        highlightedRecentBuildItem = nextItem
+        refreshVisibleMenuItems()
     }
 
     func menuDidClose(_ menu: NSMenu) {
-        if menu === workersPagesMenu {
-            (highlightedWorkersPagesItem?.view as? WorkersPagesMenuItemView)?.refreshHighlight(isHighlighted: false)
-            highlightedWorkersPagesItem = nil
+        guard menu === workersPagesMenu || menu === self.menu else {
             return
         }
-        guard menu === self.menu else {
-            return
-        }
-        (highlightedRecentBuildItem?.view as? WorkersPagesMenuItemView)?.refreshHighlight(isHighlighted: false)
-        highlightedRecentBuildItem = nil
+        clearMenuInteractionState()
     }
     private let recentBuildChangeWindow: TimeInterval = 5 * 60
     private let recentBuildMenuWindow: TimeInterval = 5 * 60

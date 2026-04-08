@@ -3,6 +3,7 @@ import Foundation
 enum AppPreferences {
     private static let notificationsEnabledKey = "notificationsEnabled"
     private static let refreshIntervalKey = "refreshInterval"
+    private static let favoriteProjectIDsKey = "favoriteProjectIDs"
 
     enum RefreshInterval: String, CaseIterable {
         case manual
@@ -50,5 +51,13 @@ enum AppPreferences {
 
     static func setRefreshInterval(_ interval: RefreshInterval) {
         UserDefaults.standard.set(interval.rawValue, forKey: refreshIntervalKey)
+    }
+
+    static var favoriteProjectIDs: Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: favoriteProjectIDsKey) ?? [])
+    }
+
+    static func setFavoriteProjectIDs(_ ids: Set<String>) {
+        UserDefaults.standard.set(Array(ids).sorted(), forKey: favoriteProjectIDsKey)
     }
 }
