@@ -144,7 +144,7 @@ resign_sparkle_bundle() {
         --force \
         --timestamp \
         --options runtime \
-        --preserve-metadata=identifier,entitlements,requirements,flags \
+        --preserve-metadata=entitlements \
         --sign "$identity" \
         "$target"
     else
