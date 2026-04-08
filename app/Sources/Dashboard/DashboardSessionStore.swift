@@ -27,10 +27,7 @@ enum DashboardSessionStore {
             kSecValueData: data,
         ]
 
-        let status = SecItemAdd(query as CFDictionary, nil)
-        guard status == errSecSuccess else {
-            throw DashboardError.keychain(status)
-        }
+        try requireSuccess(SecItemAdd(query as CFDictionary, nil), operation: "add")
     }
 
     static func clear() throws {
@@ -39,10 +36,7 @@ enum DashboardSessionStore {
             kSecAttrService: service,
         ]
 
-        let status = SecItemDelete(query as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw DashboardError.keychain(status)
-        }
+        try requireSuccessOrNotFound(SecItemDelete(query as CFDictionary), operation: "clear-all")
     }
 
     static func clear(storageKey: String) throws {
@@ -52,10 +46,27 @@ enum DashboardSessionStore {
             kSecAttrAccount: storageKey,
         ]
 
-        let status = SecItemDelete(query as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw DashboardError.keychain(status)
+        try requireSuccessOrNotFound(SecItemDelete(query as CFDictionary), operation: "clear-one")
+    }
+
+    static func smokeTest() throws {
+        let sample = DashboardSession(
+            capturedAt: Date(),
+            xAtok: "smoke-\(UUID().uuidString)",
+            cookies: [],
+            accountID: nil,
+            workerName: nil,
+            userEmail: "smoke@example.com",
+            userDisplayName: "Smoke Test",
+            userAvatarURL: nil
+        )
+
+        try save(sample)
+        let loaded = try loadAll()
+        guard loaded.contains(where: { $0.storageKey == sample.storageKey }) else {
+            throw DashboardError.loginFailed("Keychain smoke test failed at verify")
         }
+        try clear(storageKey: sample.storageKey)
     }
 
     private static func deduplicate(_ sessions: [DashboardSession]) -> [DashboardSession] {
@@ -73,6 +84,7 @@ enum DashboardSessionStore {
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
+            kSecReturnAttributes: true,
             kSecReturnData: true,
             kSecMatchLimit: kSecMatchLimitAll,
         ]
@@ -85,15 +97,30 @@ enum DashboardSessionStore {
         case errSecSuccess:
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            if let rows = item as? [Data] {
-                return try rows.map { try decoder.decode(DashboardSession.self, from: $0) }
+            if let rows = item as? [[CFString: Any]] {
+                return try rows.compactMap { row in
+                    guard let data = row[kSecValueData] as? Data else { return nil }
+                    return try decoder.decode(DashboardSession.self, from: data)
+                }
             }
-            if let data = item as? Data {
+            if let row = item as? [CFString: Any], let data = row[kSecValueData] as? Data {
                 return [try decoder.decode(DashboardSession.self, from: data)]
             }
             throw DashboardError.invalidSessionData
         default:
-            throw DashboardError.keychain(status)
+            throw DashboardError.keychainOperation("load", status)
+        }
+    }
+
+    private static func requireSuccess(_ status: OSStatus, operation: String) throws {
+        guard status == errSecSuccess else {
+            throw DashboardError.keychainOperation(operation, status)
+        }
+    }
+
+    private static func requireSuccessOrNotFound(_ status: OSStatus, operation: String) throws {
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw DashboardError.keychainOperation(operation, status)
         }
     }
 }
@@ -101,6 +128,7 @@ enum DashboardSessionStore {
 enum DashboardError: LocalizedError {
     case invalidSessionData
     case keychain(OSStatus)
+    case keychainOperation(String, OSStatus)
     case userCancelledLogin
     case loginFailed(String)
     case userNotLoggedIn
@@ -116,6 +144,8 @@ enum DashboardError: LocalizedError {
             return "Stored dashboard session is invalid."
         case let .keychain(status):
             return "Keychain error: \(status)"
+        case let .keychainOperation(operation, status):
+            return "Keychain \(operation): \(status)"
         case .userCancelledLogin:
             return "Dashboard login was cancelled."
         case let .loginFailed(message):
