@@ -776,11 +776,13 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
         guard !nextRows.isEmpty else {
             return
         }
+        let selectedRowIDs = Set(selectedRowsForAction().map(\.id))
         rows.insert(contentsOf: nextRows.reversed(), at: 0)
         if rows.count > 500 {
             rows = Array(rows.prefix(500))
         }
         tableView.reloadData()
+        restoreSelection(rowIDs: selectedRowIDs)
         updateStatus("Live • \(rows.count) rows")
     }
 
@@ -940,6 +942,13 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
 
     private func selectedRowsForAction() -> [DashboardObservabilityRow] {
         tableView.selectedRowIndexes.compactMap { rows.indices.contains($0) ? rows[$0] : nil }
+    }
+
+    private func restoreSelection(rowIDs: Set<String>) {
+        guard !rowIDs.isEmpty else { return }
+        let indexes = IndexSet(rows.enumerated().compactMap { rowIDs.contains($0.element.id) ? $0.offset : nil })
+        guard !indexes.isEmpty else { return }
+        tableView.selectRowIndexes(indexes, byExtendingSelection: false)
     }
 
     private func visibleFieldKeys() -> [String] {
