@@ -36,6 +36,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     private let summaryItem = NSMenuItem(title: "Cloudflare", action: nil, keyEquivalent: "")
     private let summarySectionSeparatorItem = NSMenuItem.separator()
     private let workersPagesItem = NSMenuItem(title: "Workers", action: nil, keyEquivalent: "")
+    private let observabilityItem = NSMenuItem(title: "Observability", action: #selector(openObservabilityFromMenu), keyEquivalent: "")
     private let refreshItem = NSMenuItem(title: "Refresh", action: #selector(refreshBuilds), keyEquivalent: "r")
     private let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
     private let checkForUpdatesItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
@@ -74,7 +75,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     private var recentBuildMenuItems: [NSMenuItem] = []
     private var favoriteProjectIDs = AppPreferences.favoriteProjectIDs
     private var hiddenProjects = AppPreferences.hiddenProjects
-    private var observabilityWindows: [String: ObservabilityWindowController] = [:]
+    private var observabilityWindow: ObservabilityWindowController?
     private let updateController: UpdateControlling
 
     init(updateController: UpdateControlling) {
@@ -107,6 +108,8 @@ final class StatusController: NSObject, NSMenuDelegate {
         workersPagesItem.submenu = workersPagesMenu
         workersPagesMenu.delegate = self
         menu.addItem(workersPagesItem)
+        observabilityItem.target = self
+        menu.addItem(observabilityItem)
 
         for item in [refreshItem, checkForUpdatesItem, settingsItem] {
             item.target = self
@@ -124,6 +127,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     private func syncMenuState() {
         let hasSession = !sessions.isEmpty || !((try? DashboardSessionStore.loadAll()) ?? []).isEmpty
         workersPagesItem.isEnabled = hasSession
+        observabilityItem.isEnabled = hasSession && projects.contains(where: { $0.kind == .worker })
         refreshItem.isEnabled = hasSession
     }
 
@@ -694,6 +698,8 @@ final class StatusController: NSObject, NSMenuDelegate {
             }
 
         rebuildWorkersPagesMenu()
+        syncMenuState()
+        syncObservabilityWindow()
         updateBuildSelectionAndSummary()
     }
 
@@ -715,23 +721,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
 
     private func relativeRefreshString(since date: Date) -> String {
-        let seconds = max(0, Int(Date().timeIntervalSince(date)))
-        if seconds < 5 {
-            return "now"
-        }
-        if seconds < 60 {
-            return "\(seconds)s ago"
-        }
-        let minutes = seconds / 60
-        if minutes < 60 {
-            return "\(minutes)m ago"
-        }
-        let hours = minutes / 60
-        if hours < 24 {
-            return "\(hours)h ago"
-        }
-        let days = hours / 24
-        return "\(days)d ago"
+        RelativeTime.shortString(since: date)
     }
 
     private func rebuildWorkersPagesMenu() {
@@ -1063,7 +1053,6 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
 
     private func hideProject(_ project: DashboardProject) {
-        closeObservabilityWindow(for: project.id)
         hiddenProjects.removeAll { $0.id == project.id }
         hiddenProjects.append(DashboardHiddenProject(project: project))
         AppPreferences.setHiddenProjects(hiddenProjects)
@@ -1091,40 +1080,46 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
 
     private func openObservability(for project: DashboardProject) {
+        let workers = observabilityWorkerProjects()
         guard let session = sessions.first(where: { $0.accountID == project.accountID }) else {
             return
         }
 
-        if let existing = observabilityWindows[project.id] {
+        if let existing = observabilityWindow {
+            existing.updateWorkers(workers, sessions: sessions, selectedProjectID: project.id)
             existing.showAndActivate()
             return
         }
 
-        let controller = ObservabilityWindowController(project: project, session: session)
+        let controller = ObservabilityWindowController(project: project, session: session, workers: workers, sessions: sessions)
         controller.onClose = { [weak self] in
-            self?.observabilityWindows.removeValue(forKey: project.id)
+            self?.observabilityWindow = nil
         }
-        observabilityWindows[project.id] = controller
+        observabilityWindow = controller
         menu.cancelTracking()
         workersPagesMenu.cancelTracking()
         controller.showAndActivate()
     }
 
-    private func closeObservabilityWindow(for projectID: String) {
-        guard let controller = observabilityWindows.removeValue(forKey: projectID) else {
+    @objc
+    private func openObservabilityFromMenu() {
+        guard let project = observabilityWorkerProjects().first else {
             return
         }
+        openObservability(for: project)
+    }
+
+    private func closeObservabilityWindow() {
+        guard let controller = observabilityWindow else {
+            return
+        }
+        observabilityWindow = nil
         controller.onClose = nil
         controller.close()
     }
 
     private func closeObservabilityWindows() {
-        let windows = observabilityWindows.values
-        observabilityWindows.removeAll()
-        for controller in windows {
-            controller.onClose = nil
-            controller.close()
-        }
+        closeObservabilityWindow()
     }
 
     private func isHidden(_ project: DashboardProject) -> Bool {
@@ -1137,6 +1132,20 @@ final class StatusController: NSObject, NSMenuDelegate {
         }
         for item in recentBuildMenuItems {
             (item.view as? WorkersPagesMenuItemView)?.resetInteractionState()
+        }
+    }
+
+    private func observabilityWorkerProjects() -> [DashboardProject] {
+        projects.filter { $0.kind == .worker }
+    }
+
+    private func syncObservabilityWindow(selectedProjectID: String? = nil) {
+        guard let controller = observabilityWindow else {
+            return
+        }
+        controller.updateWorkers(observabilityWorkerProjects(), sessions: sessions, selectedProjectID: selectedProjectID)
+        if observabilityWorkerProjects().isEmpty {
+            observabilityWindow = nil
         }
     }
 

@@ -501,6 +501,19 @@ final class DashboardAPIClient {
             return container
         }
 
+        if view == .visualizations,
+           let calculations = result["calculations"] as? [[String: Any]]
+        {
+            if let first = calculations.first {
+                var container = first
+                if let fields = result["fields"] {
+                    container["fields"] = fields
+                }
+                return container
+            }
+            return [:]
+        }
+
         guard view == .traces else {
             return nil
         }

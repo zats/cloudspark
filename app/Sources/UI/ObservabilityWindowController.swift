@@ -7,10 +7,13 @@ import SwiftUI
 final class ObservabilityWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate, NSToolbarDelegate {
     var onClose: (() -> Void)?
 
-    private let project: DashboardProject
-    private let session: DashboardSession
+    private var project: DashboardProject
+    private var session: DashboardSession
+    private var workers: [DashboardProject]
+    private var sessionsByAccountID: [String: DashboardSession]
     private let streamingSession = URLSession(configuration: .ephemeral)
 
+    private let workerControl = NSPopUpButton(frame: .zero, pullsDown: false)
     private let viewControl = NSSegmentedControl(labels: DashboardObservabilityView.allCases.map(\.title), trackingMode: .selectOne, target: nil, action: nil)
     private let liveButton = NSButton(title: "Live", target: nil, action: nil)
     private let timeframeControl = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -26,6 +29,7 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
     private let chartHostingView = NSHostingView(rootView: ObservabilityChartView(points: []))
     private var chartHeightConstraint: NSLayoutConstraint?
     private let toolbar = NSToolbar(identifier: "observability.window.toolbar")
+    private var isSelectingWorker = false
 
     private var availableFields: [DashboardObservabilityField] = []
     private var selectedFieldKeys: [String] = []
@@ -39,9 +43,14 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
     private var heartbeatTimer: Timer?
     private var isLive = false
 
-    init(project: DashboardProject, session: DashboardSession) {
+    init(project: DashboardProject, session: DashboardSession, workers: [DashboardProject], sessions: [DashboardSession]) {
         self.project = project
         self.session = session
+        self.workers = workers.filter { $0.kind == .worker }
+        self.sessionsByAccountID = Dictionary(uniqueKeysWithValues: sessions.compactMap {
+            guard let accountID = $0.accountID else { return nil }
+            return (accountID, $0)
+        })
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 980, height: 560),
@@ -51,7 +60,7 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
         )
         window.title = project.displayName
         window.minSize = NSSize(width: 760, height: 420)
-        window.titleVisibility = .visible
+        window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.isMovableByWindowBackground = true
         window.toolbarStyle = .unified
@@ -160,6 +169,7 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
     }
 
     private enum ToolbarItemID {
+        static let worker = NSToolbarItem.Identifier("observability.worker")
         static let views = NSToolbarItem.Identifier("observability.views")
         static let live = NSToolbarItem.Identifier("observability.live")
         static let timeframe = NSToolbarItem.Identifier("observability.timeframe")
@@ -169,6 +179,7 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
         [
+            ToolbarItemID.worker,
             ToolbarItemID.views,
             ToolbarItemID.live,
             ToolbarItemID.timeframe,
@@ -179,6 +190,7 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
         [
+            ToolbarItemID.worker,
             ToolbarItemID.views,
             ToolbarItemID.live,
             ToolbarItemID.timeframe,
@@ -195,6 +207,12 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
         willBeInsertedIntoToolbar flag: Bool
     ) -> NSToolbarItem? {
         switch itemIdentifier {
+        case ToolbarItemID.worker:
+            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+            item.label = "Worker"
+            item.paletteLabel = "Worker"
+            item.view = workerControl
+            return item
         case ToolbarItemID.views:
             let item = NSToolbarItem(itemIdentifier: itemIdentifier)
             item.label = "Views"
@@ -231,6 +249,10 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
     }
 
     private func configure() {
+        workerControl.target = self
+        workerControl.action = #selector(changeWorker)
+        workerControl.toolTip = "Worker"
+
         viewControl.target = self
         viewControl.action = #selector(changeView)
         viewControl.selectedSegment = DashboardObservabilityView.allCases.firstIndex(of: currentView) ?? 0
@@ -271,6 +293,7 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
         refreshButton.translatesAutoresizingMaskIntoConstraints = false
 
         NSLayoutConstraint.activate([
+            workerControl.widthAnchor.constraint(equalToConstant: 220),
             viewControl.widthAnchor.constraint(equalToConstant: 280),
             liveButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 56),
             timeframeControl.widthAnchor.constraint(equalToConstant: 84),
@@ -292,10 +315,12 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
         toDatePicker.dateValue = now
 
         customRangeStack.isHidden = true
+        rebuildWorkerControl()
 
         tableView.delegate = self
         tableView.dataSource = self
         tableView.style = .inset
+        tableView.columnAutoresizingStyle = .noColumnAutoresizing
         tableView.rowHeight = 24
         tableView.intercellSpacing = .zero
         tableView.usesAlternatingRowBackgroundColors = false
@@ -307,6 +332,33 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
         updateStatus("Loading…")
     }
 
+    func updateWorkers(_ workers: [DashboardProject], sessions: [DashboardSession], selectedProjectID: String? = nil) {
+        self.workers = workers.filter { $0.kind == .worker }
+        self.sessionsByAccountID = Dictionary(uniqueKeysWithValues: sessions.compactMap {
+            guard let accountID = $0.accountID else { return nil }
+            return (accountID, $0)
+        })
+        rebuildWorkerControl()
+
+        let nextProject = selectedProjectID.flatMap { id in
+            self.workers.first(where: { $0.id == id })
+        } ?? self.workers.first(where: { $0.id == project.id }) ?? self.workers.first
+
+        guard let nextProject,
+              let nextSession = sessionsByAccountID[nextProject.accountID]
+        else {
+            close()
+            return
+        }
+
+        if nextProject.id != project.id || nextSession.storageKey != session.storageKey {
+            applySelection(project: nextProject, session: nextSession, reload: window?.isVisible == true)
+            return
+        }
+
+        syncWorkerSelection()
+    }
+
     @objc
     private func changeView() {
         currentView = DashboardObservabilityView.allCases[viewControl.selectedSegment]
@@ -315,6 +367,19 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
         }
         updateModeUI()
         reloadHistoricalData()
+    }
+
+    @objc
+    private func changeWorker() {
+        guard !isSelectingWorker,
+              let item = workerControl.selectedItem,
+              let projectID = item.representedObject as? String,
+              let nextProject = workers.first(where: { $0.id == projectID }),
+              let nextSession = sessionsByAccountID[nextProject.accountID]
+        else {
+            return
+        }
+        applySelection(project: nextProject, session: nextSession, reload: true)
     }
 
     @objc
@@ -519,6 +584,51 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
         heartbeatTimer = nil
         liveTailSocket?.cancel(with: .goingAway, reason: nil)
         liveTailSocket = nil
+    }
+
+    private func applySelection(project: DashboardProject, session: DashboardSession, reload: Bool) {
+        stopLiveMode()
+        queryTask?.cancel()
+        self.project = project
+        self.session = session
+        window?.title = project.displayName
+        rows.removeAll(keepingCapacity: true)
+        chartPoints.removeAll(keepingCapacity: true)
+        tableView.reloadData()
+        chartHostingView.rootView = ObservabilityChartView(points: [])
+        syncWorkerSelection()
+        updateModeUI()
+        updateStatus("Loading…")
+        if reload {
+            reloadHistoricalData()
+        }
+    }
+
+    private func rebuildWorkerControl() {
+        let selectedProjectID = project.id
+        workerControl.removeAllItems()
+        for worker in workers {
+            workerControl.addItem(withTitle: worker.displayName)
+            workerControl.lastItem?.representedObject = worker.id
+        }
+        if workerControl.numberOfItems == 0 {
+            workerControl.isEnabled = false
+            return
+        }
+        workerControl.isEnabled = true
+        if let index = workers.firstIndex(where: { $0.id == selectedProjectID }) {
+            workerControl.selectItem(at: index)
+        } else {
+            workerControl.selectItem(at: 0)
+        }
+    }
+
+    private func syncWorkerSelection() {
+        isSelectingWorker = true
+        defer { isSelectingWorker = false }
+        if let index = workers.firstIndex(where: { $0.id == project.id }) {
+            workerControl.selectItem(at: index)
+        }
     }
 
     private func startHeartbeat() {
@@ -732,7 +842,7 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
         for field in fields {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(field))
             column.title = displayFieldName(field)
-            column.resizingMask = .autoresizingMask
+            column.resizingMask = .userResizingMask
             column.width = preferredWidth(for: field)
             tableView.addTableColumn(column)
         }

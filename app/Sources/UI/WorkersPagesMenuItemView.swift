@@ -497,9 +497,7 @@ final class WorkersPagesMenuItemView: NSView {
     }
 
     private func formatRelativeDate(_ date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        return formatter.localizedString(for: date, relativeTo: Date())
+        RelativeTime.shortString(since: date)
     }
 }
 
