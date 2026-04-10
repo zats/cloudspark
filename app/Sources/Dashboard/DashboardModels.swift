@@ -150,6 +150,7 @@ struct DashboardBuild: Encodable {
     let branch: String?
     let createdOn: String?
     let versionIDs: [String]
+    let destinationURL: URL?
 
     var statusKind: DashboardStatusKind {
         DashboardStatusKind(status: status)

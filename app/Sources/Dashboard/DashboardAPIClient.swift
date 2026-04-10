@@ -303,6 +303,28 @@ final class DashboardAPIClient {
         )
     }
 
+    func listLatestWorkerReleases(accountID: String, workers: [DashboardProject]) async throws -> [DashboardBuild] {
+        let externalScriptIDs = workers.compactMap(\.externalScriptID)
+        var releases = try await listLatestBuilds(accountID: accountID, externalScriptIDs: externalScriptIDs)
+        let existingScriptIDs = Set(releases.flatMap(\.versionIDs))
+
+        for worker in workers {
+            guard let scriptID = worker.externalScriptID,
+                  !existingScriptIDs.contains(scriptID),
+                  let deployment = try await fetchLatestWorkerDeployment(
+                      accountID: accountID,
+                      workerName: worker.name,
+                      externalScriptID: scriptID
+                  )
+            else {
+                continue
+            }
+            releases.append(deployment)
+        }
+
+        return releases
+    }
+
     func listBuilds(accountID: String, versionIDs: [String]) async throws -> [DashboardBuild] {
         try await listBuilds(
             path: "/accounts/\(accountID)/builds/builds",
@@ -315,6 +337,41 @@ final class DashboardAPIClient {
         let object = try parseJSON(data)
         let result = object["result"]
         return parseBuilds(from: result)
+    }
+
+    private func fetchLatestWorkerDeployment(accountID: String, workerName: String, externalScriptID: String) async throws -> DashboardBuild? {
+        guard let escapedWorkerName = workerName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
+            throw DashboardError.invalidResponse
+        }
+
+        let data = try await send(
+            path: "/accounts/\(accountID)/workers/scripts/\(escapedWorkerName)/deployments",
+            queryItems: []
+        )
+        let object = try parseJSON(data)
+        guard let result = object["result"] as? [String: Any],
+              let deployments = result["deployments"] as? [[String: Any]],
+              let latestDeployment = deployments.max(by: {
+                  parseDate($0["created_on"] as? String) ?? .distantPast
+                      < parseDate($1["created_on"] as? String) ?? .distantPast
+              })
+        else {
+            return nil
+        }
+
+        let deploymentVersionIDs = (latestDeployment["versions"] as? [[String: Any]] ?? [])
+            .compactMap { $0["version_id"] as? String }
+        let versionIDs = [externalScriptID] + deploymentVersionIDs.filter { $0 != externalScriptID }
+
+        return DashboardBuild(
+            id: (latestDeployment["id"] as? String) ?? externalScriptID,
+            status: nil,
+            buildOutcome: "success",
+            branch: nil,
+            createdOn: latestDeployment["created_on"] as? String,
+            versionIDs: versionIDs,
+            destinationURL: workerDeploymentsURL(accountID: accountID, workerName: workerName)
+        )
     }
 
     private func fetchPageDeployment(accountID: String, projectName: String) async throws -> DashboardPageDeployment? {
@@ -516,6 +573,13 @@ final class DashboardAPIClient {
         formatter.formatOptions = [.withInternetDateTime]
         return formatter
     }
+
+    private func workerDeploymentsURL(accountID: String, workerName: String) -> URL? {
+        guard let escapedWorkerName = workerName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
+            return nil
+        }
+        return URL(string: "https://dash.cloudflare.com/\(accountID)/workers/services/view/\(escapedWorkerName)/production/deployments")
+    }
 }
 
 private extension DashboardBuild {
@@ -537,7 +601,8 @@ private extension DashboardBuild {
             buildOutcome: dictionary["build_outcome"] as? String,
             branch: branch,
             createdOn: (dictionary["created_on"] as? String) ?? (dictionary["created_at"] as? String),
-            versionIDs: versionIDs
+            versionIDs: versionIDs,
+            destinationURL: nil
         )
     }
 }

@@ -337,14 +337,15 @@ final class StatusController: NSObject, NSMenuDelegate {
                     let previousBuilds = latestBuildsByID
                     var nextBuilds: [String: DashboardBuild] = [:]
                     for session in sessions {
-                        let externalScriptIDs = overviewProjectsByID.values
-                            .filter { $0.accountID == session.accountID && $0.kind == .worker }
-                            .compactMap(\.externalScriptID)
-                        guard !externalScriptIDs.isEmpty else { continue }
-                        let client = DashboardAPIClient(session: session)
-                        let latestBuilds = try await client.listLatestBuilds(
+                        let workerProjects = refreshableProjects(
                             accountID: session.accountID ?? "",
-                            externalScriptIDs: externalScriptIDs
+                            kind: .worker
+                        )
+                        guard !workerProjects.isEmpty else { continue }
+                        let client = DashboardAPIClient(session: session)
+                        let latestBuilds = try await client.listLatestWorkerReleases(
+                            accountID: session.accountID ?? "",
+                            workers: workerProjects
                         )
                         for build in latestBuilds {
                             for versionID in build.versionIDs {
@@ -365,7 +366,11 @@ final class StatusController: NSObject, NSMenuDelegate {
                         let client = DashboardAPIClient(session: session)
                         let metrics = try await client.listWorkerMetrics(accountID: session.accountID ?? "")
                         for (scriptName, metric) in metrics {
-                            nextWorkerMetricsByID["\(session.accountID ?? ""):worker:\(scriptName)"] = metric
+                            let projectID = "\(session.accountID ?? ""):worker:\(scriptName)"
+                            guard let project = overviewProjectsByID[projectID], !isHidden(project) else {
+                                continue
+                            }
+                            nextWorkerMetricsByID[projectID] = metric
                         }
                     }
                     workerMetricsByID = nextWorkerMetricsByID
@@ -377,9 +382,10 @@ final class StatusController: NSObject, NSMenuDelegate {
                     let previousDeployments = pageDeploymentsByID
                     var nextPageDeploymentsByID: [String: DashboardPageDeployment] = [:]
                     for session in sessions {
-                        let projectNames = overviewProjectsByID.values
-                            .filter { $0.accountID == session.accountID && $0.kind == .page }
-                            .map(\.name)
+                        let projectNames = refreshableProjects(
+                            accountID: session.accountID ?? "",
+                            kind: .page
+                        ).map(\.name)
                         guard !projectNames.isEmpty else { continue }
                         let client = DashboardAPIClient(session: session)
                         let deployments = try await client.listPageDeployments(
@@ -656,7 +662,7 @@ final class StatusController: NSObject, NSMenuDelegate {
                         lastReleaseAt: baseProject.lastReleaseAt,
                         metrics: workerMetricsByID[baseProject.id],
                         destinationURL: latestBuild.flatMap {
-                            workerBuildURL(accountID: baseProject.accountID, workerName: baseProject.name, buildID: $0.id)
+                            destinationURL(for: $0, workerName: baseProject.name, accountID: baseProject.accountID)
                         }
                     )
 
@@ -985,8 +991,12 @@ final class StatusController: NSObject, NSMenuDelegate {
             latestBranch: build.branch,
             lastReleaseAt: buildCreatedAt(build),
             metrics: nil,
-            destinationURL: workerBuildURL(accountID: accountID, workerName: projectName, buildID: build.id)
+            destinationURL: destinationURL(for: build, workerName: projectName, accountID: accountID)
         )
+    }
+
+    private func destinationURL(for build: DashboardBuild, workerName: String, accountID: String) -> URL? {
+        build.destinationURL ?? workerBuildURL(accountID: accountID, workerName: workerName, buildID: build.id)
     }
 
     private func workerBuildURL(accountID: String, workerName: String, buildID: String) -> URL? {
@@ -1114,6 +1124,12 @@ final class StatusController: NSObject, NSMenuDelegate {
             return outcome
         }
         return build.status?.lowercased() ?? "unknown"
+    }
+
+    private func refreshableProjects(accountID: String, kind: DashboardProjectKind) -> [DashboardProject] {
+        overviewProjectsByID.values.filter {
+            $0.accountID == accountID && $0.kind == kind && !isHidden($0)
+        }
     }
 
     private func accountEmail(for accountID: String) -> String? {
