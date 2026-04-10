@@ -64,7 +64,7 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
         window.titlebarAppearsTransparent = true
         window.isMovableByWindowBackground = true
         window.toolbarStyle = .unified
-        toolbar.displayMode = .default
+        toolbar.displayMode = .iconOnly
         toolbar.allowsUserCustomization = false
         super.init(window: window)
         toolbar.delegate = self
@@ -185,6 +185,7 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
             ToolbarItemID.live,
             ToolbarItemID.timeframe,
             ToolbarItemID.fields,
+            .space,
             ToolbarItemID.refresh,
         ]
     }
@@ -196,6 +197,7 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
             ToolbarItemID.live,
             ToolbarItemID.timeframe,
             ToolbarItemID.fields,
+            .space,
             ToolbarItemID.refresh,
             .flexibleSpace,
             .space,
@@ -293,7 +295,7 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
             viewControl.widthAnchor.constraint(equalToConstant: 280),
             liveButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 56),
             timeframeControl.widthAnchor.constraint(equalToConstant: 84),
-            fieldsButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 68),
+            fieldsButton.widthAnchor.constraint(equalToConstant: 68),
         ])
 
         [fromDatePicker, toDatePicker].forEach { picker in
@@ -317,7 +319,7 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
         tableView.columnAutoresizingStyle = .noColumnAutoresizing
         tableView.rowHeight = 24
         tableView.intercellSpacing = .zero
-        tableView.usesAlternatingRowBackgroundColors = false
+        tableView.usesAlternatingRowBackgroundColors = true
         tableView.focusRingType = .none
         tableView.allowsMultipleSelection = true
         tableView.headerView = NSTableHeaderView()
@@ -873,6 +875,25 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
         updateStatus(status)
     }
 
+    private func syncFieldsToolbarItems() {
+        if currentView.showsFields {
+            guard !toolbar.items.contains(where: { $0.itemIdentifier == ToolbarItemID.fields }) else {
+                return
+            }
+            let refreshIndex = toolbar.items.firstIndex(where: { $0.itemIdentifier == ToolbarItemID.refresh }) ?? toolbar.items.count
+            toolbar.insertItem(withItemIdentifier: ToolbarItemID.fields, at: refreshIndex)
+            toolbar.insertItem(withItemIdentifier: .space, at: refreshIndex + 1)
+            return
+        }
+
+        if let spaceIndex = toolbar.items.firstIndex(where: { $0.itemIdentifier == .space }) {
+            toolbar.removeItem(at: spaceIndex)
+        }
+        if let fieldsIndex = toolbar.items.firstIndex(where: { $0.itemIdentifier == ToolbarItemID.fields }) {
+            toolbar.removeItem(at: fieldsIndex)
+        }
+    }
+
     private func syncLiveButton() {
         liveButton.state = isLive ? .on : .off
         liveButton.title = isLive ? "Pause" : "Live"
@@ -881,7 +902,8 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
     }
 
     private func updateModeUI() {
-        fieldsButton.isHidden = !currentView.showsFields
+        fieldsButton.isEnabled = currentView.showsFields
+        syncFieldsToolbarItems()
         let showsChart = shouldShowChart
         scrollView.isHidden = currentView == .visualizations
         chartContainer.isHidden = !showsChart
