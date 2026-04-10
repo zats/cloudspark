@@ -485,7 +485,7 @@ final class DashboardAPIClient {
         )
         let object = try parseJSON(data)
         guard let result = object["result"] as? [String: Any],
-              let container = result[view.apiView] as? [String: Any]
+              let container = observabilityContainer(from: result, view: view)
         else {
             throw DashboardError.invalidResponse
         }
@@ -494,6 +494,32 @@ final class DashboardAPIClient {
         let rows = parseObservabilityRows(from: container, view: view)
         let chartPoints = parseObservabilityChartPoints(from: container["series"])
         return DashboardObservabilityQueryResult(fields: fields, rows: rows, chartPoints: chartPoints)
+    }
+
+    private func observabilityContainer(from result: [String: Any], view: DashboardObservabilityView) -> [String: Any]? {
+        if let container = result[view.apiView] as? [String: Any] {
+            return container
+        }
+
+        guard view == .traces else {
+            return nil
+        }
+
+        let traces = result["traces"] as? [[String: Any]] ?? []
+        let traceSummaries = result["traceSummaries"] as? [[String: Any]] ?? []
+        guard !traces.isEmpty || !traceSummaries.isEmpty else {
+            return [:]
+        }
+
+        var container: [String: Any] = [:]
+        container["traces"] = !traceSummaries.isEmpty ? traceSummaries : traces
+        if let fields = result["fields"] {
+            container["fields"] = fields
+        }
+        if let series = result["series"] {
+            container["series"] = series
+        }
+        return container
     }
 
     func createObservabilityLiveTailSession(
@@ -512,9 +538,10 @@ final class DashboardAPIClient {
             body: try JSONSerialization.data(withJSONObject: body)
         )
         let object = try parseJSON(data)
-        guard let result = object["result"] as? [String: Any],
-              let socketURL = makeLiveTailSocketURL(from: result, accountID: accountID, workerName: workerName)
-        else {
+        let result = object["result"] as? [String: Any] ?? [:]
+        let socketURL = (object["wsUrl"] as? String).flatMap(URL.init(string:))
+            ?? makeLiveTailSocketURL(from: result, accountID: accountID, workerName: workerName)
+        guard let socketURL else {
             throw DashboardError.invalidResponse
         }
 

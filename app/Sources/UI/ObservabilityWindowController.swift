@@ -234,6 +234,11 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
         viewControl.target = self
         viewControl.action = #selector(changeView)
         viewControl.selectedSegment = DashboardObservabilityView.allCases.firstIndex(of: currentView) ?? 0
+        if let cell = viewControl.cell as? NSSegmentedCell {
+            for (index, view) in DashboardObservabilityView.allCases.enumerated() {
+                cell.setToolTip(view.title, forSegment: index)
+            }
+        }
 
         liveButton.setButtonType(.toggle)
         liveButton.bezelStyle = .rounded
@@ -245,16 +250,19 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
         timeframeControl.target = self
         timeframeControl.action = #selector(changeTimeframePreset)
         timeframeControl.selectItem(withTitle: currentPreset.title)
+        timeframeControl.toolTip = "Timeframe"
 
         fieldsButton.bezelStyle = .rounded
         fieldsButton.target = self
         fieldsButton.action = #selector(showFieldsMenu)
+        fieldsButton.toolTip = "Fields"
 
         refreshButton.isBordered = false
         refreshButton.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Refresh")
         refreshButton.contentTintColor = .secondaryLabelColor
         refreshButton.target = self
         refreshButton.action = #selector(refreshNow)
+        refreshButton.toolTip = "Refresh"
 
         viewControl.translatesAutoresizingMaskIntoConstraints = false
         liveButton.translatesAutoresizingMaskIntoConstraints = false
@@ -277,6 +285,8 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
             picker.target = self
             picker.action = #selector(changeCustomTimeframe)
         }
+        fromDatePicker.toolTip = "From"
+        toDatePicker.toolTip = "To"
         let now = Date()
         fromDatePicker.dateValue = now.addingTimeInterval(-(DashboardObservabilityRangePreset.lastHour.interval ?? 3600))
         toDatePicker.dateValue = now
@@ -315,7 +325,7 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
         }
 
         stopLiveMode()
-        reloadHistoricalData()
+        updateStatus("Paused • \(rows.count) rows")
     }
 
     @objc
@@ -541,6 +551,9 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
             } catch is CancellationError {
                 return
             } catch {
+                if !isLive || Task.isCancelled {
+                    return
+                }
                 await MainActor.run {
                     self.stopLiveMode()
                     self.updateStatus(error.localizedDescription)
@@ -744,6 +757,7 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
         liveButton.state = isLive ? .on : .off
         liveButton.title = isLive ? "Pause" : "Live"
         liveButton.isEnabled = currentView.supportsLive
+        liveButton.toolTip = isLive ? "Pause live tail" : "Start live tail"
     }
 
     private func updateModeUI() {

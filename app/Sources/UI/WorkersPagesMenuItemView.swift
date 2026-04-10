@@ -101,12 +101,15 @@ final class WorkersPagesMenuItemView: NSView {
         accountLabel.stringValue = project.displayAccountEmail ?? ""
         accountLabel.isHidden = (project.displayAccountEmail?.isEmpty ?? true)
         observabilityButton.image = observabilityImage()
+        observabilityButton.toolTip = "Logs"
         observabilityButton.isHidden = !shouldShowObservabilityButton(highlighted: isPointerHovering)
         observabilityButton.contentTintColor = accessoryTintColor(highlighted: false)
         hideButton.image = hideImage()
+        hideButton.toolTip = "Hide"
         hideButton.isHidden = !isPointerHovering
         hideButton.contentTintColor = accessoryTintColor(highlighted: false)
         favoriteButton.image = favoriteImage(isFavorite: isFavorite)
+        favoriteButton.toolTip = isFavorite ? "Unfavorite" : "Favorite"
         favoriteButton.isHidden = !isFavorite && !isPointerHovering
         favoriteButton.contentTintColor = favoriteTintColor(highlighted: false)
 
