@@ -15,7 +15,7 @@ enum DashboardDemoMode {
         guard isEnabled else {
             return name
         }
-        return name.replacingOccurrences(of: "lorica", with: "mythos")
+        return name.replacingOccurrences(of: "lorica", with: "acme")
     }
 
     static func displayEmail(_ email: String?) -> String? {
@@ -23,6 +23,13 @@ enum DashboardDemoMode {
             return email
         }
         return email.replacingOccurrences(of: "@getlorica.com", with: "@acme.com")
+    }
+
+    static func displayObservabilityText(_ text: String) -> String {
+        guard isEnabled else {
+            return text
+        }
+        return text.replacingOccurrences(of: "lorica", with: "acme", options: [.caseInsensitive])
     }
 }
 

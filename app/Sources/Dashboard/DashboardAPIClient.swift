@@ -851,7 +851,7 @@ final class DashboardAPIClient {
     private func stringifyObservabilityValue(_ value: Any) -> String? {
         switch value {
         case let string as String:
-            return string
+            return DashboardDemoMode.displayObservabilityText(string)
         case let number as NSNumber:
             return number.stringValue
         case let bool as Bool:

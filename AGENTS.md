@@ -6,3 +6,4 @@
 - Release assets must therefore be uploaded as `Cloudspark-macos.zip`.
 - Package the app bundle with `ditto -c -k --keepParent '.../Cloudspark.app' Cloudspark-macos.zip` before uploading.
 - For release requests, run `scripts/release` directly. It already handles version bumping, building, notarization, tagging, GitHub release creation, and appcast updates; don't re-derive the steps first.
+- `DEMO=1` is screenshot-safe mode. Use existing `DashboardDemoMode` helpers instead of ad-hoc replacements so shareable screenshots consistently sanitize customer-facing text.
