@@ -26,7 +26,7 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
     private let scrollView = NSScrollView()
     private let tableView = ObservabilityTableView()
     private let chartContainer = NSView()
-    private let chartHostingView = NSHostingView(rootView: ObservabilityChartView(points: []))
+    private let chartHostingView = NSHostingView(rootView: ObservabilityChartView(points: [], view: .events))
     private var chartHeightConstraint: NSLayoutConstraint?
     private let toolbar = NSToolbar(identifier: "observability.window.toolbar")
     private var isSelectingWorker = false
@@ -365,6 +365,7 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
         if isLive {
             stopLiveMode()
         }
+        clearDisplayedData(status: "Loading…")
         updateModeUI()
         reloadHistoricalData()
     }
@@ -484,6 +485,7 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
         }
 
         queryTask?.cancel()
+        clearDisplayedData(status: "Loading…")
         queryTask = Task { [weak self] in
             guard let self else { return }
             do {
@@ -508,7 +510,7 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
                     self.chartPoints = result.chartPoints
                     self.rebuildColumns()
                     self.tableView.reloadData()
-                    self.chartHostingView.rootView = ObservabilityChartView(points: self.chartPoints)
+                    self.chartHostingView.rootView = ObservabilityChartView(points: self.chartPoints, view: self.currentView)
                     self.updateModeUI()
                     self.updateStatus(self.statusText(rows: self.rows.count, points: self.chartPoints.count))
                 }
@@ -554,7 +556,7 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
                     self.availableFields = fields
                     self.syncSelectedFields()
                     self.rebuildColumns()
-                    self.chartHostingView.rootView = ObservabilityChartView(points: [])
+                    self.chartHostingView.rootView = ObservabilityChartView(points: [], view: self.currentView)
                     self.updateModeUI()
                 }
                 let socket = self.streamingSession.webSocketTask(with: liveTail.socketURL)
@@ -595,7 +597,7 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
         rows.removeAll(keepingCapacity: true)
         chartPoints.removeAll(keepingCapacity: true)
         tableView.reloadData()
-        chartHostingView.rootView = ObservabilityChartView(points: [])
+        chartHostingView.rootView = ObservabilityChartView(points: [], view: currentView)
         syncWorkerSelection()
         updateModeUI()
         updateStatus("Loading…")
@@ -863,6 +865,14 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
         statusLabel.stringValue = text
     }
 
+    private func clearDisplayedData(status: String) {
+        rows.removeAll(keepingCapacity: true)
+        chartPoints.removeAll(keepingCapacity: true)
+        tableView.reloadData()
+        chartHostingView.rootView = ObservabilityChartView(points: [], view: currentView)
+        updateStatus(status)
+    }
+
     private func syncLiveButton() {
         liveButton.state = isLive ? .on : .off
         liveButton.title = isLive ? "Pause" : "Live"
@@ -1044,6 +1054,7 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
 
 private struct ObservabilityChartView: View {
     let points: [DashboardObservabilityChartPoint]
+    let view: DashboardObservabilityView
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1051,6 +1062,8 @@ private struct ObservabilityChartView: View {
                 Text("No data")
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            } else if view == .visualizations {
+                visualsLineChart
             } else if points.contains(where: hasMultipleSegments) {
                 stackedBarChart
             } else if points.contains(where: { $0.date != nil }) {
@@ -1086,9 +1099,20 @@ private struct ObservabilityChartView: View {
             } else {
                 Chart(points) { point in
                     BarMark(
-                        x: .value("Group", point.label),
+                        x: .value("Group", point.id),
                         y: .value("Count", point.value)
                     )
+                }
+                .chartXAxis {
+                    AxisMarks(values: visibleCategoryTickIDs) { value in
+                        AxisGridLine()
+                        AxisTick()
+                        AxisValueLabel(centered: true) {
+                            if let id = value.as(String.self) {
+                                Text(categoryAxisLabel(for: id))
+                            }
+                        }
+                    }
                 }
                 .chartYAxis {
                     AxisMarks(position: .leading)
@@ -1098,6 +1122,66 @@ private struct ObservabilityChartView: View {
         .padding(12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color(NSColor.textBackgroundColor))
+    }
+
+    private var visualsLineChart: some View {
+        Group {
+            if points.contains(where: { $0.date != nil }) {
+                Chart(points) { point in
+                    if let date = point.date {
+                        LineMark(
+                            x: .value("Time", date),
+                            y: .value("Value", point.value)
+                        )
+                        .interpolationMethod(.catmullRom)
+
+                        AreaMark(
+                            x: .value("Time", date),
+                            y: .value("Value", point.value)
+                        )
+                        .foregroundStyle(.blue.opacity(0.12))
+                    }
+                }
+                .chartXAxis {
+                    AxisMarks(values: visibleDateTicks) { value in
+                        AxisGridLine()
+                        AxisTick()
+                        AxisValueLabel(centered: true) {
+                            if let date = value.as(Date.self) {
+                                Text(timeAxisLabel(for: date))
+                            }
+                        }
+                    }
+                }
+            } else {
+                Chart(points) { point in
+                    LineMark(
+                        x: .value("Group", point.id),
+                        y: .value("Value", point.value)
+                    )
+                    .interpolationMethod(.catmullRom)
+
+                    PointMark(
+                        x: .value("Group", point.id),
+                        y: .value("Value", point.value)
+                    )
+                }
+                .chartXAxis {
+                    AxisMarks(values: visibleCategoryTickIDs) { value in
+                        AxisGridLine()
+                        AxisTick()
+                        AxisValueLabel(centered: true) {
+                            if let id = value.as(String.self) {
+                                Text(categoryAxisLabel(for: id))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .chartYAxis {
+            AxisMarks(position: .leading)
+        }
     }
 
     private var stackedBarChart: some View {
@@ -1193,6 +1277,14 @@ private struct ObservabilityChartView: View {
     }
 
     private func stackedBarCategoryLabel(for id: String) -> String {
+        guard let point = points.first(where: { $0.id == id }) else { return "" }
+        if let date = point.date {
+            return timeAxisLabel(for: date)
+        }
+        return point.label
+    }
+
+    private func categoryAxisLabel(for id: String) -> String {
         guard let point = points.first(where: { $0.id == id }) else { return "" }
         if let date = point.date {
             return timeAxisLabel(for: date)
