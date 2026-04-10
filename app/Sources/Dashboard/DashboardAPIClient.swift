@@ -403,6 +403,137 @@ final class DashboardAPIClient {
         )
     }
 
+    func listObservabilityFields(
+        accountID: String,
+        workerName: String,
+        timeframe: DashboardObservabilityTimeframe
+    ) async throws -> [DashboardObservabilityField] {
+        let body: [String: Any] = [
+            "from": timeframe.apiValue["from"] ?? 0,
+            "to": timeframe.apiValue["to"] ?? 0,
+            "datasets": [],
+            "filters": observabilityFilters(workerName: workerName),
+            "limit": 10_000,
+        ]
+        let data = try await send(
+            path: "/accounts/\(accountID)/workers/observability/telemetry/keys",
+            queryItems: [],
+            httpMethod: "POST",
+            body: try JSONSerialization.data(withJSONObject: body)
+        )
+        let object = try parseJSON(data)
+        guard let result = object["result"] as? [[String: Any]] else {
+            throw DashboardError.invalidResponse
+        }
+
+        return result.compactMap { item in
+            guard let key = item["key"] as? String,
+                  let type = item["type"] as? String,
+                  !key.isEmpty
+            else {
+                return nil
+            }
+            let lastSeenAt = item["lastSeenAt"] as? Double ?? Double(item["lastSeenAt"] as? Int64 ?? 0)
+            return DashboardObservabilityField(
+                key: key,
+                type: type,
+                lastSeenAt: lastSeenAt > 0 ? Date(timeIntervalSince1970: lastSeenAt / 1000) : nil
+            )
+        }
+    }
+
+    func queryObservability(
+        accountID: String,
+        workerName: String,
+        view: DashboardObservabilityView,
+        timeframe: DashboardObservabilityTimeframe
+    ) async throws -> DashboardObservabilityQueryResult {
+        var parameters: [String: Any] = [
+            "datasets": ["cloudflare-workers", "otel"],
+            "filters": observabilityFilters(workerName: workerName),
+            "filterCombination": "and",
+        ]
+
+        if view == .visualizations {
+            parameters["calculations"] = [["operator": "count"]]
+            parameters["groupBys"] = []
+            parameters["orderBy"] = [
+                "value": "count",
+                "limit": view.limit,
+                "order": "desc",
+            ]
+            parameters["limit"] = view.limit
+        }
+
+        var body: [String: Any] = [
+            "queryId": "workers-observability",
+            "parameters": parameters,
+            "timeframe": timeframe.apiValue,
+            "view": view.apiView,
+            "limit": view.limit,
+            "offsetDirection": "next",
+        ]
+        if view.includesChart {
+            body["chart"] = true
+        }
+
+        let data = try await send(
+            path: "/accounts/\(accountID)/workers/observability/telemetry/query",
+            queryItems: [],
+            httpMethod: "POST",
+            body: try JSONSerialization.data(withJSONObject: body)
+        )
+        let object = try parseJSON(data)
+        guard let result = object["result"] as? [String: Any],
+              let container = result[view.apiView] as? [String: Any]
+        else {
+            throw DashboardError.invalidResponse
+        }
+
+        let fields = parseObservabilityFields(from: container["fields"])
+        let rows = parseObservabilityRows(from: container, view: view)
+        let chartPoints = parseObservabilityChartPoints(from: container["series"])
+        return DashboardObservabilityQueryResult(fields: fields, rows: rows, chartPoints: chartPoints)
+    }
+
+    func createObservabilityLiveTailSession(
+        accountID: String,
+        workerName: String
+    ) async throws -> DashboardObservabilityLiveTailSession {
+        let body: [String: Any] = [
+            "scriptId": workerName,
+            "filters": [],
+            "filterCombination": "and",
+        ]
+        let data = try await send(
+            path: "/accounts/\(accountID)/workers/observability/telemetry/live-tail",
+            queryItems: [],
+            httpMethod: "POST",
+            body: try JSONSerialization.data(withJSONObject: body)
+        )
+        let object = try parseJSON(data)
+        guard let result = object["result"] as? [String: Any],
+              let socketURL = makeLiveTailSocketURL(from: result, accountID: accountID, workerName: workerName)
+        else {
+            throw DashboardError.invalidResponse
+        }
+
+        return DashboardObservabilityLiveTailSession(socketURL: socketURL)
+    }
+
+    func sendObservabilityLiveTailHeartbeat(
+        accountID: String,
+        workerName: String
+    ) async throws {
+        let body: [String: Any] = ["scriptId": workerName]
+        _ = try await send(
+            path: "/accounts/\(accountID)/workers/observability/telemetry/live-tail/heartbeat",
+            queryItems: [],
+            httpMethod: "POST",
+            body: try JSONSerialization.data(withJSONObject: body)
+        )
+    }
+
     private func send(path: String, queryItems: [URLQueryItem], httpMethod: String = "GET", body: Data? = nil) async throws -> Data {
         var components = URLComponents(string: "https://dash.cloudflare.com/api/v4\(path)")
         components?.queryItems = queryItems
@@ -415,6 +546,9 @@ final class DashboardAPIClient {
         request.httpMethod = httpMethod
         for (field, value) in browserHeaders {
             request.setValue(value, forHTTPHeaderField: field)
+        }
+        if body != nil {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
         request.setValue(session.xAtok, forHTTPHeaderField: "x-atok")
         request.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
@@ -517,6 +651,290 @@ final class DashboardAPIClient {
                 .compactMap { DashboardBuild(dictionary: $0, mapKey: nil) }
         }
         return []
+    }
+
+    private func observabilityFilters(workerName: String) -> [[String: Any]] {
+        [[
+            "key": "$metadata.service",
+            "type": "string",
+            "value": workerName,
+            "operation": "eq",
+        ]]
+    }
+
+    private func parseObservabilityFields(from value: Any?) -> [DashboardObservabilityField] {
+        guard let fields = value as? [[String: Any]] else {
+            return []
+        }
+        return fields.compactMap { item in
+            guard let key = item["key"] as? String,
+                  let type = item["type"] as? String,
+                  !key.isEmpty
+            else {
+                return nil
+            }
+            let lastSeenAt = item["lastSeenAt"] as? Double ?? Double(item["lastSeenAt"] as? Int64 ?? 0)
+            return DashboardObservabilityField(
+                key: key,
+                type: type,
+                lastSeenAt: lastSeenAt > 0 ? Date(timeIntervalSince1970: lastSeenAt / 1000) : nil
+            )
+        }
+    }
+
+    private func parseObservabilityRows(from container: [String: Any], view: DashboardObservabilityView) -> [DashboardObservabilityRow] {
+        guard view != .visualizations else {
+            return []
+        }
+        let rowArrays: [[[String: Any]]] = [
+            container[view.apiView] as? [[String: Any]] ?? [],
+            container["events"] as? [[String: Any]] ?? [],
+            container["invocations"] as? [[String: Any]] ?? [],
+            container["traces"] as? [[String: Any]] ?? [],
+            container["results"] as? [[String: Any]] ?? [],
+        ]
+
+        let rows = rowArrays.first(where: { !$0.isEmpty }) ?? []
+        return rows.enumerated().map { index, row in
+            let flattened = flattenObservabilityRow(row)
+            let timestampValue = flattened["timestamp"] ?? flattened["datetime"] ?? flattened["time"]
+            let timestamp = timestampValue.flatMap(parseDate)
+            return DashboardObservabilityRow(
+                id: flattened["$metadata.id"] ?? flattened["trace.id"] ?? flattened["span.id"] ?? "\(index)-\(flattened["timestamp"] ?? "")",
+                timestamp: timestamp,
+                values: flattened
+            )
+        }
+    }
+
+    private func parseObservabilityChartPoints(from value: Any?) -> [DashboardObservabilityChartPoint] {
+        let rows: [[String: Any]]
+        if let typed = value as? [[String: Any]] {
+            rows = typed
+        } else if let containers = value as? [[[String: Any]]] {
+            rows = containers.flatMap { $0 }
+        } else {
+            rows = []
+        }
+
+        return rows.enumerated().compactMap { index, row in
+            if let bucketPoint = parseObservabilityBucketChartPoint(row: row, index: index) {
+                return bucketPoint
+            }
+            let flattened = flattenObservabilityRow(row)
+            let date = observabilityChartDate(from: row, flattened: flattened)
+            let value = observabilityChartValue(from: row, flattened: flattened)
+            guard let value else {
+                return nil
+            }
+            let label = observabilityChartLabel(from: row, flattened: flattened, fallback: date.map(chartAxisLabel) ?? "Point \(index + 1)")
+            return DashboardObservabilityChartPoint(
+                id: flattened["id"] ?? flattened["key"] ?? "\(index)-\(label)",
+                date: date,
+                label: label,
+                value: value,
+                segments: [DashboardObservabilityChartSegment(id: "\(index)-total", kind: .info, value: value)]
+            )
+        }
+    }
+
+    private func parseObservabilityBucketChartPoint(row: [String: Any], index: Int) -> DashboardObservabilityChartPoint? {
+        guard let data = row["data"] as? [[String: Any]], !data.isEmpty else {
+            return nil
+        }
+
+        let totalValue = data.reduce(0.0) { partial, item in
+            partial + (observabilityChartValue(from: item, flattened: flattenObservabilityRow(item)) ?? 0)
+        }
+        let errorValue = data.reduce(0.0) { partial, item in
+            partial + observabilityErrorValue(from: item)
+        }
+        let infoValue = max(0, totalValue - errorValue)
+        let segments = [
+            infoValue > 0 ? DashboardObservabilityChartSegment(id: "\(index)-info", kind: .info, value: infoValue) : nil,
+            errorValue > 0 ? DashboardObservabilityChartSegment(id: "\(index)-error", kind: .error, value: errorValue) : nil,
+        ].compactMap { $0 }
+        guard totalValue > 0 else {
+            return nil
+        }
+
+        let flattened = flattenObservabilityRow(row)
+        let date = observabilityChartDate(from: row, flattened: flattened)
+        let label = observabilityChartLabel(from: row, flattened: flattened, fallback: date.map(chartAxisLabel) ?? "Point \(index + 1)")
+        return DashboardObservabilityChartPoint(
+            id: flattened["id"] ?? flattened["time"] ?? "\(index)-\(label)",
+            date: date,
+            label: label,
+            value: totalValue,
+            segments: segments
+        )
+    }
+
+    private func flattenObservabilityRow(_ row: [String: Any]) -> [String: String] {
+        var flattened: [String: String] = [:]
+        flattenObservabilityValue(row, prefix: nil, into: &flattened)
+        return flattened
+    }
+
+    private func flattenObservabilityValue(_ value: Any, prefix: String?, into result: inout [String: String]) {
+        if let dictionary = value as? [String: Any] {
+            for key in dictionary.keys.sorted() {
+                let nextPrefix = prefix.map { "\($0).\(key)" } ?? key
+                flattenObservabilityValue(dictionary[key] as Any, prefix: nextPrefix, into: &result)
+            }
+            return
+        }
+
+        if let array = value as? [Any] {
+            if array.allSatisfy({ !($0 is [String: Any]) && !($0 is [Any]) }) {
+                let scalarValues = array.compactMap(stringifyObservabilityValue)
+                if !scalarValues.isEmpty, let prefix {
+                    result[prefix] = scalarValues.joined(separator: ", ")
+                }
+                return
+            }
+            if let prefix,
+               let data = try? JSONSerialization.data(withJSONObject: array),
+               let string = String(data: data, encoding: .utf8)
+            {
+                result[prefix] = string
+            }
+            return
+        }
+
+        guard let prefix, let string = stringifyObservabilityValue(value) else {
+            return
+        }
+        result[prefix] = string
+    }
+
+    private func stringifyObservabilityValue(_ value: Any) -> String? {
+        switch value {
+        case let string as String:
+            return string
+        case let number as NSNumber:
+            return number.stringValue
+        case let bool as Bool:
+            return bool ? "true" : "false"
+        case _ as NSNull:
+            return nil
+        default:
+            return "\(value)"
+        }
+    }
+
+    private func observabilityChartDate(from row: [String: Any], flattened: [String: String]) -> Date? {
+        if let timestamp = flattened["timestamp"] ?? flattened["datetime"] ?? flattened["time"] {
+            if let parsed = parseDate(timestamp) {
+                return parsed
+            }
+            if let doubleValue = Double(timestamp), doubleValue > 1_000_000 {
+                return Date(timeIntervalSince1970: doubleValue / 1000)
+            }
+        }
+
+        for key in ["from", "start", "bucket", "ts"] {
+            if let raw = row[key] {
+                if let parsed = observabilityDateValue(raw) {
+                    return parsed
+                }
+            }
+        }
+        return nil
+    }
+
+    private func observabilityChartValue(from row: [String: Any], flattened: [String: String]) -> Double? {
+        for key in ["value", "count", "sum", "y"] {
+            if let value = flattened[key].flatMap(Double.init) {
+                return value
+            }
+        }
+
+        for (key, value) in flattened where key != "timestamp" && key != "datetime" && key != "time" {
+            if let parsed = Double(value) {
+                return parsed
+            }
+        }
+        return nil
+    }
+
+    private func observabilityErrorValue(from row: [String: Any]) -> Double {
+        let flattened = flattenObservabilityRow(row)
+        for key in ["errors", "_countErrors", "aggregates._countErrors", "errorCount"] {
+            if let value = flattened[key].flatMap(Double.init) {
+                return value
+            }
+        }
+        return 0
+    }
+
+    private func observabilityChartLabel(from row: [String: Any], flattened: [String: String], fallback: String) -> String {
+        for key in ["label", "name", "group", "key"] {
+            if let value = flattened[key], !value.isEmpty {
+                return value
+            }
+        }
+
+        if let dimensions = row["dimensions"] as? [String: Any] {
+            for key in dimensions.keys.sorted() {
+                if let value = stringifyObservabilityValue(dimensions[key] as Any), !value.isEmpty {
+                    return value
+                }
+            }
+        }
+
+        return fallback
+    }
+
+    private func observabilityDateValue(_ value: Any) -> Date? {
+        if let string = stringifyObservabilityValue(value) {
+            if let parsed = parseDate(string) {
+                return parsed
+            }
+            if let doubleValue = Double(string), doubleValue > 1_000_000 {
+                return Date(timeIntervalSince1970: doubleValue / 1000)
+            }
+        }
+        return nil
+    }
+
+    private func chartAxisLabel(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: date)
+    }
+
+    private func makeLiveTailSocketURL(
+        from result: [String: Any],
+        accountID: String,
+        workerName: String
+    ) -> URL? {
+        if let urlString = result["url"] as? String {
+            return URL(string: urlString)
+        }
+        if let websocket = result["websocket"] as? [String: Any],
+           let urlString = websocket["url"] as? String {
+            return URL(string: urlString)
+        }
+
+        let userID = (result["userId"] as? String) ?? (result["user_id"] as? String)
+        let key = result["key"] as? String
+        let serviceID = (result["serviceId"] as? String) ?? (result["service_id"] as? String) ?? workerName
+        guard let userID, let key else {
+            return nil
+        }
+
+        var components = URLComponents()
+        components.scheme = "wss"
+        components.host = "live-tail.observability.cloudflare.com"
+        components.path = "/connect"
+        components.queryItems = [
+            URLQueryItem(name: "accountId", value: accountID),
+            URLQueryItem(name: "userId", value: userID),
+            URLQueryItem(name: "key", value: key),
+            URLQueryItem(name: "serviceId", value: serviceID),
+        ]
+        return components.url
     }
 
     private func parseDate(_ value: String?) -> Date? {

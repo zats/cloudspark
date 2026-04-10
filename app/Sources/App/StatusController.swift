@@ -74,6 +74,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     private var recentBuildMenuItems: [NSMenuItem] = []
     private var favoriteProjectIDs = AppPreferences.favoriteProjectIDs
     private var hiddenProjects = AppPreferences.hiddenProjects
+    private var observabilityWindows: [String: ObservabilityWindowController] = [:]
     private let updateController: UpdateControlling
 
     init(updateController: UpdateControlling) {
@@ -618,6 +619,7 @@ final class StatusController: NSObject, NSMenuDelegate {
             hasLoadedWorkerMetrics = false
             hasLoadedPageDeployments = false
             recentBuildChangesByKey = [:]
+            closeObservabilityWindows()
             rebuildWorkersPagesMenu()
             settingsController.refresh(sessions: sessions, hiddenProjects: hiddenProjects)
             syncMenuState()
@@ -878,6 +880,7 @@ final class StatusController: NSObject, NSMenuDelegate {
             project: project,
             isFavorite: isFavorite(project),
             onClick: openURLAction(project.destinationURL),
+            onShowObservability: openObservabilityAction(project),
             onToggleFavorite: toggleFavoriteAction(project),
             onHide: hideProjectAction(project)
         )
@@ -891,6 +894,7 @@ final class StatusController: NSObject, NSMenuDelegate {
             project: entry.project,
             isFavorite: isFavorite(entry.project),
             onClick: openURLAction(entry.project.destinationURL),
+            onShowObservability: openObservabilityAction(entry.project),
             onToggleFavorite: toggleFavoriteAction(entry.project),
             onHide: hideProjectAction(entry.project)
         )
@@ -904,6 +908,7 @@ final class StatusController: NSObject, NSMenuDelegate {
             project: project,
             isFavorite: isFavorite(project),
             onClick: openURLAction(project.destinationURL),
+            onShowObservability: openObservabilityAction(project),
             onToggleFavorite: toggleFavoriteAction(project),
             onHide: hideProjectAction(project)
         )
@@ -917,6 +922,7 @@ final class StatusController: NSObject, NSMenuDelegate {
             project: entry.project,
             isFavorite: isFavorite(entry.project),
             onClick: openURLAction(entry.project.destinationURL),
+            onShowObservability: openObservabilityAction(entry.project),
             onToggleFavorite: toggleFavoriteAction(entry.project),
             onHide: hideProjectAction(entry.project)
         )
@@ -1031,6 +1037,15 @@ final class StatusController: NSObject, NSMenuDelegate {
         }
     }
 
+    private func openObservabilityAction(_ project: DashboardProject) -> (() -> Void)? {
+        guard project.kind == .worker else {
+            return nil
+        }
+        return { [weak self] in
+            self?.openObservability(for: project)
+        }
+    }
+
     private func toggleFavorite(for project: DashboardProject) {
         if favoriteProjectIDs.contains(project.id) {
             favoriteProjectIDs.remove(project.id)
@@ -1048,6 +1063,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
 
     private func hideProject(_ project: DashboardProject) {
+        closeObservabilityWindow(for: project.id)
         hiddenProjects.removeAll { $0.id == project.id }
         hiddenProjects.append(DashboardHiddenProject(project: project))
         AppPreferences.setHiddenProjects(hiddenProjects)
@@ -1072,6 +1088,43 @@ final class StatusController: NSObject, NSMenuDelegate {
 
     private func isFavorite(_ project: DashboardProject) -> Bool {
         favoriteProjectIDs.contains(project.id)
+    }
+
+    private func openObservability(for project: DashboardProject) {
+        guard let session = sessions.first(where: { $0.accountID == project.accountID }) else {
+            return
+        }
+
+        if let existing = observabilityWindows[project.id] {
+            existing.showAndActivate()
+            return
+        }
+
+        let controller = ObservabilityWindowController(project: project, session: session)
+        controller.onClose = { [weak self] in
+            self?.observabilityWindows.removeValue(forKey: project.id)
+        }
+        observabilityWindows[project.id] = controller
+        menu.cancelTracking()
+        workersPagesMenu.cancelTracking()
+        controller.showAndActivate()
+    }
+
+    private func closeObservabilityWindow(for projectID: String) {
+        guard let controller = observabilityWindows.removeValue(forKey: projectID) else {
+            return
+        }
+        controller.onClose = nil
+        controller.close()
+    }
+
+    private func closeObservabilityWindows() {
+        let windows = observabilityWindows.values
+        observabilityWindows.removeAll()
+        for controller in windows {
+            controller.onClose = nil
+            controller.close()
+        }
     }
 
     private func isHidden(_ project: DashboardProject) -> Bool {
