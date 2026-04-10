@@ -17,8 +17,8 @@ settings:
     SWIFT_VERSION: 6.0
     PRODUCT_BUNDLE_IDENTIFIER: com.zats.cloudspark2
     PRODUCT_NAME: Cloudspark
-    MARKETING_VERSION: 1.12
-    CURRENT_PROJECT_VERSION: 15
+    MARKETING_VERSION: 1.13
+    CURRENT_PROJECT_VERSION: 16
     GENERATE_INFOPLIST_FILE: NO
     INFOPLIST_FILE: Support/cloudflare2/Info.plist
     INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
