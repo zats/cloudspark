@@ -6,6 +6,27 @@
         <description>Most recent Cloudspark releases.</description>
         <language>en</language>
         <item>
+            <title>1.13.16</title>
+            <pubDate>Fri, 10 Apr 2026 16:37:12 -0400</pubDate>
+            <link>https://raw.githubusercontent.com/zats/cloudspark/main/appcast.xml</link>
+            <sparkle:version>16</sparkle:version>
+            <sparkle:shortVersionString>1.13.16</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[<ul>
+<li>Update appcast for 1.12.15</li>
+<li>Add worker deployment refresh fallback</li>
+<li>Add workers observability window</li>
+<li>Refine observability window behavior</li>
+<li>Improve observability window UX</li>
+<li>Add observability table actions</li>
+<li>Clear observability data on view switch</li>
+<li>Refine observability toolbar items</li>
+<li>Preserve live log selection</li>
+</ul>
+]]></description>
+            <enclosure url="https://github.com/zats/cloudspark/releases/download/v1.13.16/Cloudspark-macos.zip" length="2630777" type="application/octet-stream" sparkle:edSignature="vHB45SCB9HPtteJvN/OdJBgFdIt1XauiBjcXswWaR5PmEPGrCbVbQ7Xw1DmtP0mbmQ0r7wTzCllFJ8zHpgocBg=="/>
+        </item>
+        <item>
             <title>1.12.15</title>
             <pubDate>Wed, 08 Apr 2026 19:48:50 -0400</pubDate>
             <link>https://raw.githubusercontent.com/zats/cloudspark/main/appcast.xml</link>
@@ -32,20 +53,6 @@
 </ul>
 ]]></description>
             <enclosure url="https://github.com/zats/cloudspark/releases/download/v1.11.14/Cloudspark-macos.zip" length="2391884" type="application/octet-stream" sparkle:edSignature="2T0iMSWPJ2dBgQq1AwKH0zcVWNbVN8p3IKFebrnyJNv0OdvGZWgu2gqXllmIBPGcA50UJVjKd2OX1yCeo5QbAA=="/>
-        </item>
-        <item>
-            <title>1.10.13</title>
-            <pubDate>Wed, 08 Apr 2026 19:24:35 -0400</pubDate>
-            <link>https://raw.githubusercontent.com/zats/cloudspark/main/appcast.xml</link>
-            <sparkle:version>13</sparkle:version>
-            <sparkle:shortVersionString>1.10.13</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[<ul>
-<li>Update appcast for 1.9.12</li>
-<li>Add hidden projects to menu and settings</li>
-</ul>
-]]></description>
-            <enclosure url="https://github.com/zats/cloudspark/releases/download/v1.10.13/Cloudspark-macos.zip" length="2391729" type="application/octet-stream" sparkle:edSignature="VevromESjMi/I0GFDeKnNbcc5ueK3Z5IfdAoEQv+1/UheIAUtHPz6AgyNTrKflgmXUUABRn9SNHpe41aIOAiBg=="/>
         </item>
     </channel>
 </rss>
