@@ -2,6 +2,7 @@ import AppKit
 import Charts
 import Foundation
 import SwiftUI
+import UniformTypeIdentifiers
 
 @MainActor
 final class ObservabilityWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate, NSToolbarDelegate {
@@ -18,13 +19,12 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
     private let liveButton = NSButton(title: "Live", target: nil, action: nil)
     private let timeframeControl = NSPopUpButton(frame: .zero, pullsDown: false)
     private let fieldsButton = NSButton(title: "Fields", target: nil, action: nil)
-    private let refreshButton = NSButton()
     private let customRangeStack = NSStackView()
     private let fromDatePicker = NSDatePicker()
     private let toDatePicker = NSDatePicker()
     private let statusLabel = NSTextField(labelWithString: "")
     private let scrollView = NSScrollView()
-    private let tableView = NSTableView()
+    private let tableView = ObservabilityTableView()
     private let chartContainer = NSView()
     private let chartHostingView = NSHostingView(rootView: ObservabilityChartView(points: []))
     private var chartHeightConstraint: NSLayoutConstraint?
@@ -180,6 +180,7 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
         [
             ToolbarItemID.worker,
+            .flexibleSpace,
             ToolbarItemID.views,
             ToolbarItemID.live,
             ToolbarItemID.timeframe,
@@ -241,7 +242,10 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
             let item = NSToolbarItem(itemIdentifier: itemIdentifier)
             item.label = "Refresh"
             item.paletteLabel = "Refresh"
-            item.view = refreshButton
+            item.toolTip = "Refresh"
+            item.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Refresh")
+            item.target = self
+            item.action = #selector(refreshNow)
             return item
         default:
             return nil
@@ -279,18 +283,10 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
         fieldsButton.action = #selector(showFieldsMenu)
         fieldsButton.toolTip = "Fields"
 
-        refreshButton.isBordered = false
-        refreshButton.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Refresh")
-        refreshButton.contentTintColor = .secondaryLabelColor
-        refreshButton.target = self
-        refreshButton.action = #selector(refreshNow)
-        refreshButton.toolTip = "Refresh"
-
         viewControl.translatesAutoresizingMaskIntoConstraints = false
         liveButton.translatesAutoresizingMaskIntoConstraints = false
         timeframeControl.translatesAutoresizingMaskIntoConstraints = false
         fieldsButton.translatesAutoresizingMaskIntoConstraints = false
-        refreshButton.translatesAutoresizingMaskIntoConstraints = false
 
         NSLayoutConstraint.activate([
             workerControl.widthAnchor.constraint(equalToConstant: 220),
@@ -298,8 +294,6 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
             liveButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 56),
             timeframeControl.widthAnchor.constraint(equalToConstant: 84),
             fieldsButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 68),
-            refreshButton.widthAnchor.constraint(equalToConstant: 24),
-            refreshButton.heightAnchor.constraint(equalToConstant: 24),
         ])
 
         [fromDatePicker, toDatePicker].forEach { picker in
@@ -325,8 +319,14 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
         tableView.intercellSpacing = .zero
         tableView.usesAlternatingRowBackgroundColors = false
         tableView.focusRingType = .none
-        tableView.allowsMultipleSelection = false
+        tableView.allowsMultipleSelection = true
         tableView.headerView = NSTableHeaderView()
+        tableView.onCopyRows = { [weak self] in
+            self?.copySelectedRows()
+        }
+        tableView.onExportRows = { [weak self] format in
+            self?.exportSelectedRows(as: format)
+        }
         rebuildColumns()
         updateModeUI()
         updateStatus("Loading…")
@@ -906,6 +906,95 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
         return ISO8601DateFormatter().date(from: value)
     }
 
+    private func selectedRowsForAction() -> [DashboardObservabilityRow] {
+        tableView.selectedRowIndexes.compactMap { rows.indices.contains($0) ? rows[$0] : nil }
+    }
+
+    private func visibleFieldKeys() -> [String] {
+        tableView.tableColumns.map(\.identifier.rawValue)
+    }
+
+    private func displayedValue(for row: DashboardObservabilityRow, key: String) -> String {
+        if let value = row.values[key], !value.isEmpty {
+            return value
+        }
+        if key == "timestamp", let timestamp = row.timestamp {
+            return iso8601String(for: timestamp)
+        }
+        return ""
+    }
+
+    private func iso8601String(for date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+    }
+
+    private func csvEscaped(_ value: String) -> String {
+        let escaped = value.replacingOccurrences(of: "\"", with: "\"\"")
+        return "\"\(escaped)\""
+    }
+
+    private func copySelectedRows() {
+        let selectedRows = selectedRowsForAction()
+        guard !selectedRows.isEmpty else { return }
+
+        let fieldKeys = visibleFieldKeys()
+        let lines = selectedRows.map { row in
+            fieldKeys.map { displayedValue(for: row, key: $0) }.joined(separator: "\t")
+        }
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(lines.joined(separator: "\n"), forType: .string)
+        updateStatus("Copied \(selectedRows.count) row\(selectedRows.count == 1 ? "" : "s")")
+    }
+
+    private func exportSelectedRows(as format: ObservabilityTableView.ExportFormat) {
+        let selectedRows = selectedRowsForAction()
+        guard !selectedRows.isEmpty else { return }
+
+        let fieldKeys = visibleFieldKeys()
+        let panel = NSSavePanel()
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = "\(project.name)-\(currentView.title.lowercased())-rows.\(format.fileExtension)"
+        panel.allowedContentTypes = [format.contentType]
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+
+        do {
+            let data = try exportData(for: selectedRows, fieldKeys: fieldKeys, format: format)
+            try data.write(to: url, options: .atomic)
+            updateStatus("Exported \(selectedRows.count) row\(selectedRows.count == 1 ? "" : "s")")
+        } catch {
+            updateStatus(error.localizedDescription)
+        }
+    }
+
+    private func exportData(
+        for rows: [DashboardObservabilityRow],
+        fieldKeys: [String],
+        format: ObservabilityTableView.ExportFormat
+    ) throws -> Data {
+        switch format {
+        case .csv:
+            let header = fieldKeys.map(displayFieldName).map(csvEscaped).joined(separator: ",")
+            let body = rows.map { row in
+                fieldKeys.map { csvEscaped(displayedValue(for: row, key: $0)) }.joined(separator: ",")
+            }
+            return Data(([header] + body).joined(separator: "\n").utf8)
+        case .json:
+            let payload = rows.map { row in
+                Dictionary(uniqueKeysWithValues: fieldKeys.map { key in
+                    (displayFieldName(key), displayedValue(for: row, key: key))
+                })
+            }
+            return try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+        }
+    }
+
     func numberOfRows(in tableView: NSTableView) -> Int {
         rows.count
     }
@@ -980,6 +1069,17 @@ private struct ObservabilityChartView: View {
                         .foregroundStyle(.blue.opacity(0.12))
                     }
                 }
+                .chartXAxis {
+                    AxisMarks(values: visibleDateTicks) { value in
+                        AxisGridLine()
+                        AxisTick()
+                        AxisValueLabel(centered: true) {
+                            if let date = value.as(Date.self) {
+                                Text(timeAxisLabel(for: date))
+                            }
+                        }
+                    }
+                }
                 .chartYAxis {
                     AxisMarks(position: .leading)
                 }
@@ -1001,20 +1101,50 @@ private struct ObservabilityChartView: View {
     }
 
     private var stackedBarChart: some View {
-        Chart(points) { point in
-            ForEach(point.segments) { segment in
-                if let date = point.date {
-                    BarMark(
-                        x: .value("Time", date),
-                        y: .value("Count", segment.value)
-                    )
-                    .foregroundStyle(by: .value("Type", segment.kind.title))
-                } else {
-                    BarMark(
-                        x: .value("Group", point.label),
-                        y: .value("Count", segment.value)
-                    )
-                    .foregroundStyle(by: .value("Type", segment.kind.title))
+        Group {
+            if points.allSatisfy({ $0.date != nil }) {
+                Chart(points) { point in
+                    if let date = point.date {
+                        ForEach(point.segments) { segment in
+                            BarMark(
+                                x: .value("Time", date),
+                                y: .value("Count", segment.value)
+                            )
+                            .foregroundStyle(by: .value("Type", segment.kind.title))
+                        }
+                    }
+                }
+                .chartXAxis {
+                    AxisMarks(values: visibleDateTicks) { value in
+                        AxisGridLine()
+                        AxisTick()
+                        AxisValueLabel(centered: true) {
+                            if let date = value.as(Date.self) {
+                                Text(timeAxisLabel(for: date))
+                            }
+                        }
+                    }
+                }
+            } else {
+                Chart(points) { point in
+                    ForEach(point.segments) { segment in
+                        BarMark(
+                            x: .value("Time", point.id),
+                            y: .value("Count", segment.value)
+                        )
+                        .foregroundStyle(by: .value("Type", segment.kind.title))
+                    }
+                }
+                .chartXAxis {
+                    AxisMarks(values: visibleCategoryTickIDs) { value in
+                        AxisGridLine()
+                        AxisTick()
+                        AxisValueLabel(centered: true) {
+                            if let id = value.as(String.self) {
+                                Text(stackedBarCategoryLabel(for: id))
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1030,6 +1160,44 @@ private struct ObservabilityChartView: View {
 
     private func hasMultipleSegments(_ point: DashboardObservabilityChartPoint) -> Bool {
         point.segments.count > 1
+    }
+
+    private var visibleDateTicks: [Date] {
+        let dates = points.compactMap(\.date)
+        guard !dates.isEmpty else { return [] }
+
+        let targetCount = 4
+        let stride = max(1, Int(ceil(Double(dates.count) / Double(targetCount))))
+        var ticks = Array(dates.enumerated().compactMap { index, date in
+            index.isMultiple(of: stride) ? date : nil
+        })
+        if let last = dates.last, ticks.last != last {
+            ticks.append(last)
+        }
+        return ticks
+    }
+
+    private func timeAxisLabel(for date: Date) -> String {
+        let formatter = DateFormatter()
+        let span = (points.compactMap(\.date).max() ?? date).timeIntervalSince(points.compactMap(\.date).min() ?? date)
+        formatter.dateFormat = span >= 86_400 ? "MMM d HH:mm" : "HH:mm"
+        return formatter.string(from: date)
+    }
+
+    private var visibleCategoryTickIDs: [String] {
+        guard !points.isEmpty else { return [] }
+        let stride = max(1, Int(ceil(Double(points.count) / 4.0)))
+        return points.enumerated().compactMap { index, point in
+            index.isMultiple(of: stride) || index == points.count - 1 ? point.id : nil
+        }
+    }
+
+    private func stackedBarCategoryLabel(for id: String) -> String {
+        guard let point = points.first(where: { $0.id == id }) else { return "" }
+        if let date = point.date {
+            return timeAxisLabel(for: date)
+        }
+        return point.label
     }
 }
 
@@ -1060,5 +1228,85 @@ private final class ObservabilityCellView: NSTableCellView {
         textLabel.stringValue = text
         textLabel.toolTip = text
         textLabel.textColor = color ?? .labelColor
+    }
+}
+
+@MainActor
+private final class ObservabilityTableView: NSTableView {
+    enum ExportFormat {
+        case csv
+        case json
+
+        var fileExtension: String {
+            switch self {
+            case .csv: "csv"
+            case .json: "json"
+            }
+        }
+
+        var contentType: UTType {
+            switch self {
+            case .csv: .commaSeparatedText
+            case .json: .json
+            }
+        }
+    }
+
+    var onCopyRows: (() -> Void)?
+    var onExportRows: ((ExportFormat) -> Void)?
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let point = convert(event.locationInWindow, from: nil)
+        let row = row(at: point)
+        guard row >= 0 else {
+            return nil
+        }
+
+        if !selectedRowIndexes.contains(row) {
+            selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        }
+
+        let menu = NSMenu()
+        let copyItem = NSMenuItem(title: "Copy", action: #selector(copyRowsFromMenu), keyEquivalent: "")
+        copyItem.target = self
+        menu.addItem(copyItem)
+        menu.addItem(.separator())
+
+        let exportMenu = NSMenu(title: "Export Rows")
+        let csvItem = NSMenuItem(title: "CSV", action: #selector(exportCSVFromMenu), keyEquivalent: "")
+        csvItem.target = self
+        exportMenu.addItem(csvItem)
+        let jsonItem = NSMenuItem(title: "JSON", action: #selector(exportJSONFromMenu), keyEquivalent: "")
+        jsonItem.target = self
+        exportMenu.addItem(jsonItem)
+
+        let exportItem = NSMenuItem(title: "Export Rows", action: nil, keyEquivalent: "")
+        exportItem.submenu = exportMenu
+        menu.addItem(exportItem)
+        return menu
+    }
+
+    override func keyDown(with event: NSEvent) {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if flags == .command, event.charactersIgnoringModifiers?.lowercased() == "c" {
+            onCopyRows?()
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    @objc
+    private func copyRowsFromMenu() {
+        onCopyRows?()
+    }
+
+    @objc
+    private func exportCSVFromMenu() {
+        onExportRows?(.csv)
+    }
+
+    @objc
+    private func exportJSONFromMenu() {
+        onExportRows?(.json)
     }
 }
