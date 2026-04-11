@@ -3,6 +3,7 @@ options:
   minimumXcodeGenVersion: 2.43.0
   projectFormat: xcode16_0
   deploymentTarget:
+    # Cloudspark is macOS 26+ only.
     macOS: "26.0"
   defaultSourceDirectoryType: syncedFolder
 fileGroups:

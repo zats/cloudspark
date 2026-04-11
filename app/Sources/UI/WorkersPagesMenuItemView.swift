@@ -449,13 +449,11 @@ final class WorkersPagesMenuItemView: NSView {
     }
 
     private func updateStatusSymbolEffect() {
-        if #available(macOS 14.0, *) {
-            statusIconView.removeAllSymbolEffects(animated: false)
-            guard project.statusKind == .inProgress else {
-                return
-            }
-            statusIconView.addSymbolEffect(.rotate.byLayer, options: .repeat(.continuous))
+        statusIconView.removeAllSymbolEffects(animated: false)
+        guard project.statusKind == .inProgress else {
+            return
         }
+        statusIconView.addSymbolEffect(.rotate.byLayer, options: .repeat(.continuous))
     }
 
     private func statusColor(for status: String?) -> NSColor {

@@ -3,6 +3,9 @@ import Foundation
 
 @MainActor
 final class StatusController: NSObject, NSMenuDelegate {
+    private static let inProgressStatusSymbolName = "arrow.2.circlepath"
+    private static let inProgressStatusSymbolConfiguration = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
+
     private enum Endpoint: CaseIterable, Hashable {
         case overview
         case latestBuilds
@@ -42,6 +45,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
 
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let statusIconView = NSImageView()
     private let menu = NSMenu()
     private let workersPagesMenu = NSMenu()
     private let summaryItem = NSMenuItem(title: "Cloudflare", action: nil, keyEquivalent: "")
@@ -88,6 +92,8 @@ final class StatusController: NSObject, NSMenuDelegate {
     private var metricsWindow: MetricsWindowController?
     private var observabilityWindow: ObservabilityWindowController?
     private let updateController: UpdateControlling
+    private var currentStatusIconSymbolName: String?
+    private var isStatusIconAnimating = false
 
     init(updateController: UpdateControlling) {
         self.updateController = updateController
@@ -107,8 +113,13 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
 
     private func configureMenu() {
-        statusItem.button?.image = NSImage(systemSymbolName: "cloud.fill", accessibilityDescription: AppBundle.name)
-        statusItem.button?.imagePosition = .imageOnly
+        configureStatusButton()
+        let initialSymbolName = statusIconSymbolName(
+            activeRecentChanges: [],
+            hasInProgressBuild: false
+        )
+        statusIconView.image = statusIconImage(symbolName: initialSymbolName, shouldAnimate: false)
+        currentStatusIconSymbolName = initialSymbolName
         statusItem.button?.toolTip = nil
 
         summaryItem.isEnabled = false
@@ -147,32 +158,81 @@ final class StatusController: NSObject, NSMenuDelegate {
     private func updateStatusIcon() {
         let referenceDate = Date()
         let activeRecentChanges = activeRecentBuildChanges(referenceDate: referenceDate)
-        statusItem.button?.image = statusIconImage(
+        let hasInProgressBuild = hasInProgressStatuses(referenceDate: referenceDate)
+        let symbolName = statusIconSymbolName(
             activeRecentChanges: activeRecentChanges,
-            hasInProgressBuild: hasInProgressStatuses(referenceDate: referenceDate)
+            hasInProgressBuild: hasInProgressBuild
         )
-        statusItem.button?.imagePosition = .imageOnly
+        let shouldAnimate = symbolName == Self.inProgressStatusSymbolName
+        if currentStatusIconSymbolName != symbolName || isStatusIconAnimating != shouldAnimate {
+            statusIconView.image = statusIconImage(
+                symbolName: symbolName,
+                shouldAnimate: shouldAnimate
+            )
+            updateStatusIconEffect(shouldAnimate: shouldAnimate)
+            currentStatusIconSymbolName = symbolName
+            isStatusIconAnimating = shouldAnimate
+        }
         statusItem.button?.title = ""
         statusItem.button?.toolTip = statusTooltip(activeRecentChanges: activeRecentChanges)
     }
 
-    private func statusIconImage(
+    private func statusIconSymbolName(
         activeRecentChanges: [RecentBuildChange],
         hasInProgressBuild: Bool
-    ) -> NSImage? {
-        let symbolName: String
-
+    ) -> String {
         if activeRecentChanges.contains(where: { $0.statusKind == .failure }) {
-            symbolName = "exclamationmark.icloud.fill"
+            return "exclamationmark.icloud.fill"
         } else if hasInProgressBuild {
-            symbolName = "arrow.2.circlepath"
+            return Self.inProgressStatusSymbolName
         } else if let latestChange = activeRecentChanges.first {
-            symbolName = latestChange.symbolName
+            return latestChange.symbolName
         } else {
-            symbolName = "icloud.fill"
+            return "icloud.fill"
+        }
+    }
+
+    private func statusIconImage(
+        symbolName: String,
+        shouldAnimate: Bool
+    ) -> NSImage? {
+        let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: AppBundle.name)
+        if shouldAnimate {
+            return image?.withSymbolConfiguration(Self.inProgressStatusSymbolConfiguration)
+        }
+        return image
+    }
+
+    private func updateStatusIconEffect(shouldAnimate: Bool) {
+        statusIconView.removeAllSymbolEffects(animated: false)
+        guard shouldAnimate else {
+            return
+        }
+        statusIconView.addSymbolEffect(.rotate.byLayer, options: .repeat(.continuous))
+    }
+
+    private func configureStatusButton() {
+        guard let button = statusItem.button else {
+            return
+        }
+        button.image = nil
+        button.imagePosition = .imageOnly
+        button.title = ""
+
+        guard statusIconView.superview !== button else {
+            return
         }
 
-        return NSImage(systemSymbolName: symbolName, accessibilityDescription: AppBundle.name)
+        statusIconView.translatesAutoresizingMaskIntoConstraints = false
+        statusIconView.imageScaling = .scaleProportionallyUpOrDown
+        statusIconView.contentTintColor = .labelColor
+        button.addSubview(statusIconView)
+        NSLayoutConstraint.activate([
+            statusIconView.centerXAnchor.constraint(equalTo: button.centerXAnchor),
+            statusIconView.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+            statusIconView.widthAnchor.constraint(greaterThanOrEqualToConstant: 14),
+            statusIconView.heightAnchor.constraint(greaterThanOrEqualToConstant: 14),
+        ])
     }
 
     private func statusTooltip(activeRecentChanges: [RecentBuildChange]) -> String? {
@@ -1078,7 +1138,7 @@ final class StatusController: NSObject, NSMenuDelegate {
             symbolName: "chart.xyaxis.line",
             project: project,
             action: .metrics,
-            enabled: project.kind == .worker
+            enabled: true
         ))
         menu.addItem(makeProjectSubmenuItem(
             title: "Observability",
@@ -1262,18 +1322,18 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
 
     private func openMetrics(for project: DashboardProject) {
-        let workers = observabilityWorkerProjects()
+        let metricsProjects = projects
         guard let session = sessions.first(where: { $0.accountID == project.accountID }) else {
             return
         }
 
         if let existing = metricsWindow {
-            existing.updateWorkers(workers, sessions: sessions, selectedProjectID: project.id)
+            existing.updateProjects(metricsProjects, sessions: sessions, selectedProjectID: project.id)
             existing.showAndActivate()
             return
         }
 
-        let controller = MetricsWindowController(project: project, session: session, workers: workers, sessions: sessions)
+        let controller = MetricsWindowController(project: project, session: session, projects: metricsProjects, sessions: sessions)
         controller.onClose = { [weak self] in
             self?.metricsWindow = nil
         }
@@ -1285,7 +1345,7 @@ final class StatusController: NSObject, NSMenuDelegate {
 
     @objc
     private func openMetricsFromMenu() {
-        guard let project = observabilityWorkerProjects().first else {
+        guard let project = projects.first else {
             return
         }
         openMetrics(for: project)
@@ -1341,8 +1401,8 @@ final class StatusController: NSObject, NSMenuDelegate {
 
     private func syncObservabilityWindow(selectedProjectID: String? = nil) {
         if let controller = metricsWindow {
-            controller.updateWorkers(observabilityWorkerProjects(), sessions: sessions, selectedProjectID: selectedProjectID)
-            if observabilityWorkerProjects().isEmpty {
+            controller.updateProjects(projects, sessions: sessions, selectedProjectID: selectedProjectID)
+            if projects.isEmpty {
                 metricsWindow = nil
             }
         }
