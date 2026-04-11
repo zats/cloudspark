@@ -3,8 +3,6 @@ import Foundation
 
 @MainActor
 final class StatusController: NSObject, NSMenuDelegate {
-    private static let inProgressStatusImageName = NSImage.Name("BuildInProgress")
-
     private enum Endpoint: CaseIterable, Hashable {
         case overview
         case latestBuilds
@@ -30,12 +28,26 @@ final class StatusController: NSObject, NSMenuDelegate {
         let changedAt: Date?
     }
 
+    private enum ProjectSubmenuAction {
+        case openInBrowser
+        case metrics
+        case observability
+        case toggleFavorite
+        case hide
+    }
+
+    private struct ProjectSubmenuContext {
+        let project: DashboardProject
+        let action: ProjectSubmenuAction
+    }
+
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
     private let workersPagesMenu = NSMenu()
     private let summaryItem = NSMenuItem(title: "Cloudflare", action: nil, keyEquivalent: "")
     private let summarySectionSeparatorItem = NSMenuItem.separator()
     private let workersPagesItem = NSMenuItem(title: "Workers", action: nil, keyEquivalent: "")
+    private let metricsItem = NSMenuItem(title: "Metrics", action: #selector(openMetricsFromMenu), keyEquivalent: "")
     private let observabilityItem = NSMenuItem(title: "Observability", action: #selector(openObservabilityFromMenu), keyEquivalent: "")
     private let refreshItem = NSMenuItem(title: "Refresh", action: #selector(refreshBuilds), keyEquivalent: "r")
     private let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
@@ -75,6 +87,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     private var recentBuildMenuItems: [NSMenuItem] = []
     private var favoriteProjectIDs = AppPreferences.favoriteProjectIDs
     private var hiddenProjects = AppPreferences.hiddenProjects
+    private var metricsWindow: MetricsWindowController?
     private var observabilityWindow: ObservabilityWindowController?
     private let updateController: UpdateControlling
 
@@ -108,6 +121,8 @@ final class StatusController: NSObject, NSMenuDelegate {
         workersPagesItem.submenu = workersPagesMenu
         workersPagesMenu.delegate = self
         menu.addItem(workersPagesItem)
+        metricsItem.target = self
+        menu.addItem(metricsItem)
         observabilityItem.target = self
         menu.addItem(observabilityItem)
 
@@ -115,7 +130,6 @@ final class StatusController: NSObject, NSMenuDelegate {
             item.target = self
             menu.addItem(item)
         }
-
         checkForUpdatesItem.isEnabled = updateController.isAvailable
 
         menu.addItem(NSMenuItem.separator())
@@ -127,8 +141,10 @@ final class StatusController: NSObject, NSMenuDelegate {
     private func syncMenuState() {
         let hasSession = !sessions.isEmpty || !((try? DashboardSessionStore.loadAll()) ?? []).isEmpty
         workersPagesItem.isEnabled = hasSession
+        metricsItem.isEnabled = hasSession && projects.contains(where: { $0.kind == .worker })
         observabilityItem.isEnabled = hasSession && projects.contains(where: { $0.kind == .worker })
         refreshItem.isEnabled = hasSession
+        checkForUpdatesItem.isEnabled = updateController.isAvailable
     }
 
     private func updateSummary(_ text: String) {
@@ -141,7 +157,7 @@ final class StatusController: NSObject, NSMenuDelegate {
         let activeRecentChanges = activeRecentBuildChanges(referenceDate: referenceDate)
         statusItem.button?.image = statusIconImage(
             activeRecentChanges: activeRecentChanges,
-            hasInProgressBuild: hasInProgressStatuses()
+            hasInProgressBuild: hasInProgressStatuses(referenceDate: referenceDate)
         )
         statusItem.button?.imagePosition = .imageOnly
         statusItem.button?.title = ""
@@ -157,18 +173,13 @@ final class StatusController: NSObject, NSMenuDelegate {
         if activeRecentChanges.contains(where: { $0.statusKind == .failure }) {
             symbolName = "exclamationmark.icloud.fill"
         } else if hasInProgressBuild {
-            symbolName = Self.inProgressStatusImageName
+            symbolName = "arrow.2.circlepath"
         } else if let latestChange = activeRecentChanges.first {
             symbolName = latestChange.symbolName
         } else {
             symbolName = "icloud.fill"
         }
 
-        if symbolName == Self.inProgressStatusImageName {
-            let image = NSImage(named: Self.inProgressStatusImageName)!
-            image.isTemplate = true
-            return image
-        }
         return NSImage(systemSymbolName: symbolName, accessibilityDescription: AppBundle.name)
     }
 
@@ -704,7 +715,8 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
 
     private func updateBuildSelectionAndSummary() {
-        let running = projects.filter { $0.statusKind == .inProgress }.count
+        let referenceDate = Date()
+        let running = inProgressRecentBuildMenuEntries(referenceDate: referenceDate).count
         updateStatusIcon()
 
         if running > 0 {
@@ -746,37 +758,89 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
 
     private func recentBuildMenuEntries(referenceDate: Date) -> [RecentBuildMenuEntry] {
-        var entriesByID: [String: RecentBuildMenuEntry] = [:]
+        var entriesByProjectID: [String: RecentBuildMenuEntry] = [:]
 
         for entry in currentRecentBuildMenuEntries(referenceDate: referenceDate) {
-            entriesByID[entry.id] = entry
+            mergeRecentBuildMenuEntry(entry, into: &entriesByProjectID)
+        }
+
+        for entry in overviewInProgressMenuEntries() {
+            mergeRecentBuildMenuEntry(entry, into: &entriesByProjectID)
         }
 
         for change in activeRecentBuildChanges(referenceDate: referenceDate) {
-            if let existingEntry = entriesByID[change.id] {
-                entriesByID[change.id] = RecentBuildMenuEntry(
-                    id: change.id,
+            mergeRecentBuildMenuEntry(
+                RecentBuildMenuEntry(
+                    id: change.project.id,
                     project: change.project,
-                    isInProgress: existingEntry.isInProgress || change.isInProgress,
-                    changedAt: max(existingEntry.changedAt ?? .distantPast, change.changedAt)
-                )
-                continue
-            }
-            entriesByID[change.id] = RecentBuildMenuEntry(
-                id: change.id,
-                project: change.project,
-                isInProgress: change.isInProgress,
-                changedAt: change.changedAt
+                    isInProgress: change.isInProgress,
+                    changedAt: change.changedAt
+                ),
+                into: &entriesByProjectID
             )
         }
 
-        return entriesByID.values
+        return entriesByProjectID.values
             .sorted { lhs, rhs in
                 if isFavorite(lhs.project) != isFavorite(rhs.project) {
                     return isFavorite(lhs.project)
                 }
                 return (lhs.changedAt ?? .distantPast) > (rhs.changedAt ?? .distantPast)
             }
+    }
+
+    private func mergeRecentBuildMenuEntry(
+        _ entry: RecentBuildMenuEntry,
+        into entriesByProjectID: inout [String: RecentBuildMenuEntry]
+    ) {
+        let projectID = entry.project.id
+        guard let existingEntry = entriesByProjectID[projectID] else {
+            entriesByProjectID[projectID] = RecentBuildMenuEntry(
+                id: projectID,
+                project: entry.project,
+                isInProgress: entry.isInProgress,
+                changedAt: entry.changedAt
+            )
+            return
+        }
+
+        entriesByProjectID[projectID] = RecentBuildMenuEntry(
+            id: projectID,
+            project: entry.project,
+            isInProgress: existingEntry.isInProgress || entry.isInProgress,
+            changedAt: newestRecentBuildDate(existingEntry.changedAt, entry.changedAt)
+        )
+    }
+
+    private func newestRecentBuildDate(_ lhs: Date?, _ rhs: Date?) -> Date? {
+        switch (lhs, rhs) {
+        case let (lhs?, rhs?):
+            max(lhs, rhs)
+        case let (lhs?, nil):
+            lhs
+        case let (nil, rhs?):
+            rhs
+        case (nil, nil):
+            nil
+            }
+    }
+
+    private func overviewInProgressMenuEntries() -> [RecentBuildMenuEntry] {
+        projects
+            .filter { $0.statusKind == .inProgress && !isHidden($0) }
+            .map {
+                RecentBuildMenuEntry(
+                    id: $0.id,
+                    project: $0,
+                    isInProgress: true,
+                    changedAt: $0.lastReleaseAt
+                )
+            }
+    }
+
+    private func inProgressRecentBuildMenuEntries(referenceDate: Date) -> [RecentBuildMenuEntry] {
+        recentBuildMenuEntries(referenceDate: referenceDate)
+            .filter(\.isInProgress)
     }
 
     private func currentRecentBuildMenuEntries(referenceDate: Date) -> [RecentBuildMenuEntry] {
@@ -796,7 +860,7 @@ final class StatusController: NSObject, NSMenuDelegate {
             }
             entries.append(
                 RecentBuildMenuEntry(
-                    id: build.id,
+                    id: project.id,
                     project: project,
                     isInProgress: statusKind == .inProgress,
                     changedAt: buildCreatedAt(build)
@@ -818,7 +882,7 @@ final class StatusController: NSObject, NSMenuDelegate {
             }
             entries.append(
                 RecentBuildMenuEntry(
-                    id: recentDeploymentKey(projectID: projectID, deployment: deployment),
+                    id: project.id,
                     project: project,
                     isInProgress: statusKind == .inProgress,
                     changedAt: deployment.lastReleaseAt
@@ -866,6 +930,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     private func makeWorkersPagesMenuItem(project: DashboardProject) -> NSMenuItem {
         let item = NSMenuItem(title: project.displayName, action: nil, keyEquivalent: "")
         item.representedObject = project
+        item.submenu = makeProjectSubmenu(for: project)
         item.view = WorkersPagesMenuItemView(
             project: project,
             isFavorite: isFavorite(project),
@@ -880,6 +945,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     private func makeRecentBuildMenuItem(entry: RecentBuildMenuEntry) -> NSMenuItem {
         let item = NSMenuItem(title: entry.project.displayName, action: nil, keyEquivalent: "")
         item.representedObject = entry
+        item.submenu = makeProjectSubmenu(for: entry.project)
         item.view = WorkersPagesMenuItemView(
             project: entry.project,
             isFavorite: isFavorite(entry.project),
@@ -894,6 +960,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     private func updateWorkersPagesMenuItem(item: NSMenuItem, project: DashboardProject) {
         item.representedObject = project
         item.title = project.displayName
+        item.submenu = makeProjectSubmenu(for: project)
         (item.view as? WorkersPagesMenuItemView)?.update(
             project: project,
             isFavorite: isFavorite(project),
@@ -908,6 +975,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     private func updateRecentBuildMenuItem(item: NSMenuItem, entry: RecentBuildMenuEntry) {
         item.representedObject = entry
         item.title = entry.project.displayName
+        item.submenu = makeProjectSubmenu(for: entry.project)
         (item.view as? WorkersPagesMenuItemView)?.update(
             project: entry.project,
             isFavorite: isFavorite(entry.project),
@@ -995,6 +1063,68 @@ final class StatusController: NSObject, NSMenuDelegate {
         build.destinationURL ?? workerBuildURL(accountID: accountID, workerName: workerName, buildID: build.id)
     }
 
+    private func makeProjectSubmenu(for project: DashboardProject) -> NSMenu {
+        let menu = NSMenu(title: project.displayName)
+        menu.addItem(makeProjectSubmenuItem(
+            title: "Open in Browser",
+            symbolName: "globe",
+            project: project,
+            action: .openInBrowser,
+            enabled: project.destinationURL != nil
+        ))
+        menu.addItem(makeProjectSubmenuItem(
+            title: "Metrics",
+            symbolName: "chart.xyaxis.line",
+            project: project,
+            action: .metrics,
+            enabled: project.kind == .worker
+        ))
+        menu.addItem(makeProjectSubmenuItem(
+            title: "Observability",
+            symbolName: "chart.line.text.clipboard",
+            project: project,
+            action: .observability,
+            enabled: project.kind == .worker
+        ))
+        menu.addItem(.separator())
+        menu.addItem(makeProjectSubmenuItem(
+            title: isFavorite(project) ? "Unfavorite" : "Favorite",
+            symbolName: isFavorite(project) ? "star.slash" : "star",
+            project: project,
+            action: .toggleFavorite,
+            enabled: true
+        ))
+        menu.addItem(makeProjectSubmenuItem(
+            title: project.kind == .worker ? "Hide Worker" : "Hide Page",
+            symbolName: "eye.slash",
+            project: project,
+            action: .hide,
+            enabled: true
+        ))
+        return menu
+    }
+
+    private func makeProjectSubmenuItem(
+        title: String,
+        symbolName: String,
+        project: DashboardProject,
+        action: ProjectSubmenuAction,
+        enabled: Bool
+    ) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: #selector(handleProjectSubmenuAction(_:)), keyEquivalent: "")
+        item.target = self
+        item.isEnabled = enabled
+        item.representedObject = ProjectSubmenuContext(project: project, action: action)
+        item.image = submenuSymbolImage(symbolName)
+        return item
+    }
+
+    private func submenuSymbolImage(_ symbolName: String) -> NSImage? {
+        let configuration = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
+        return NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
+            .withSymbolConfiguration(configuration)
+    }
+
     private func workerBuildURL(accountID: String, workerName: String, buildID: String) -> URL? {
         guard let escapedWorkerName = workerName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
               let escapedBuildID = buildID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
@@ -1033,6 +1163,35 @@ final class StatusController: NSObject, NSMenuDelegate {
         }
         return { [weak self] in
             self?.openObservability(for: project)
+        }
+    }
+
+    private func openMetricsAction(_ project: DashboardProject) -> (() -> Void)? {
+        guard project.kind == .worker else {
+            return nil
+        }
+        return { [weak self] in
+            self?.openMetrics(for: project)
+        }
+    }
+
+    @objc
+    private func handleProjectSubmenuAction(_ sender: NSMenuItem) {
+        guard let context = sender.representedObject as? ProjectSubmenuContext else {
+            return
+        }
+
+        switch context.action {
+        case .openInBrowser:
+            openURLAction(context.project.destinationURL)?()
+        case .metrics:
+            openMetricsAction(context.project)?()
+        case .observability:
+            openObservabilityAction(context.project)?()
+        case .toggleFavorite:
+            toggleFavorite(for: context.project)
+        case .hide:
+            hideProject(context.project)
         }
     }
 
@@ -1101,6 +1260,36 @@ final class StatusController: NSObject, NSMenuDelegate {
         controller.showAndActivate()
     }
 
+    private func openMetrics(for project: DashboardProject) {
+        let workers = observabilityWorkerProjects()
+        guard let session = sessions.first(where: { $0.accountID == project.accountID }) else {
+            return
+        }
+
+        if let existing = metricsWindow {
+            existing.updateWorkers(workers, sessions: sessions, selectedProjectID: project.id)
+            existing.showAndActivate()
+            return
+        }
+
+        let controller = MetricsWindowController(project: project, session: session, workers: workers, sessions: sessions)
+        controller.onClose = { [weak self] in
+            self?.metricsWindow = nil
+        }
+        metricsWindow = controller
+        menu.cancelTracking()
+        workersPagesMenu.cancelTracking()
+        controller.showAndActivate()
+    }
+
+    @objc
+    private func openMetricsFromMenu() {
+        guard let project = observabilityWorkerProjects().first else {
+            return
+        }
+        openMetrics(for: project)
+    }
+
     @objc
     private func openObservabilityFromMenu() {
         guard let project = observabilityWorkerProjects().first else {
@@ -1118,7 +1307,17 @@ final class StatusController: NSObject, NSMenuDelegate {
         controller.close()
     }
 
+    private func closeMetricsWindow() {
+        guard let controller = metricsWindow else {
+            return
+        }
+        metricsWindow = nil
+        controller.onClose = nil
+        controller.close()
+    }
+
     private func closeObservabilityWindows() {
+        closeMetricsWindow()
         closeObservabilityWindow()
     }
 
@@ -1140,6 +1339,13 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
 
     private func syncObservabilityWindow(selectedProjectID: String? = nil) {
+        if let controller = metricsWindow {
+            controller.updateWorkers(observabilityWorkerProjects(), sessions: sessions, selectedProjectID: selectedProjectID)
+            if observabilityWorkerProjects().isEmpty {
+                metricsWindow = nil
+            }
+        }
+
         guard let controller = observabilityWindow else {
             return
         }
@@ -1151,16 +1357,10 @@ final class StatusController: NSObject, NSMenuDelegate {
 
     private func refreshVisibleMenuItems() {
         for item in workersPagesMenu.items {
-            guard let project = item.representedObject as? DashboardProject else {
-                continue
-            }
-            updateWorkersPagesMenuItem(item: item, project: project)
+            (item.view as? WorkersPagesMenuItemView)?.syncPointerHoverState()
         }
         for item in recentBuildMenuItems {
-            guard let entry = item.representedObject as? RecentBuildMenuEntry else {
-                continue
-            }
-            updateRecentBuildMenuItem(item: item, entry: entry)
+            (item.view as? WorkersPagesMenuItemView)?.syncPointerHoverState()
         }
     }
 
@@ -1279,7 +1479,7 @@ final class StatusController: NSObject, NSMenuDelegate {
 
             let projectName = project.displayName
             let status = displayStatus(for: build)
-            let body = build.branch.map { "\(status) • \($0)" } ?? status
+            let body = DashboardDemoMode.displaySecondaryText(build.branch).map { "\(status) • \($0)" } ?? status
 
             if build.isInProgress {
                 BuildNotificationManager.notify(title: projectName, body: body)
@@ -1310,7 +1510,7 @@ final class StatusController: NSObject, NSMenuDelegate {
             }
 
             let status = deployment.latestStatus?.lowercased() ?? "unknown"
-            let body = deployment.latestBranch.map { "\(status) • \($0)" } ?? status
+            let body = DashboardDemoMode.displaySecondaryText(deployment.latestBranch).map { "\(status) • \($0)" } ?? status
             let statusKind = DashboardStatusKind(status: deployment.latestStatus)
             if statusKind == .inProgress || statusKind == .success || statusKind == .failure {
                 BuildNotificationManager.notify(title: project.displayName, body: body)
@@ -1365,7 +1565,7 @@ final class StatusController: NSObject, NSMenuDelegate {
 
     private func statusIconSymbolName(for build: DashboardBuild) -> String {
         if build.isInProgress {
-            return Self.inProgressStatusImageName
+            return "arrow.2.circlepath"
         }
         if build.isFailed {
             return "exclamationmark.icloud.fill"
@@ -1379,7 +1579,7 @@ final class StatusController: NSObject, NSMenuDelegate {
     private func statusIconSymbolName(for statusKind: DashboardStatusKind) -> String {
         switch statusKind {
         case .inProgress:
-            Self.inProgressStatusImageName
+            "arrow.2.circlepath"
         case .failure:
             "exclamationmark.icloud.fill"
         case .success:
@@ -1476,8 +1676,8 @@ final class StatusController: NSObject, NSMenuDelegate {
         )
     }
 
-    private func hasInProgressStatuses() -> Bool {
-        projects.contains { $0.statusKind == .inProgress }
+    private func hasInProgressStatuses(referenceDate: Date = Date()) -> Bool {
+        !inProgressRecentBuildMenuEntries(referenceDate: referenceDate).isEmpty
     }
 
     func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {

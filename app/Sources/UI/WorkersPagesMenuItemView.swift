@@ -86,8 +86,8 @@ final class WorkersPagesMenuItemView: NSView {
         )
         iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 16, weight: .medium)
         nameLabel.stringValue = project.displayName
-        subtitleLabel.stringValue = project.subtitle ?? ""
-        subtitleLabel.isHidden = (project.subtitle?.isEmpty ?? true)
+        subtitleLabel.stringValue = project.displaySubtitle ?? ""
+        subtitleLabel.isHidden = (project.displaySubtitle?.isEmpty ?? true)
 
         statusIconView.isHidden = (project.statusText?.isEmpty ?? true)
         statusIconView.image = statusImage(for: project.statusText)
@@ -437,7 +437,7 @@ final class WorkersPagesMenuItemView: NSView {
     private func statusImage(for status: String?) -> NSImage? {
         let symbolName = switch DashboardStatusKind(status: status) {
         case .inProgress:
-            "arrow.trianglehead.2.clockwise"
+            "arrow.2.circlepath"
         case .success:
             "checkmark.circle.fill"
         case .failure:

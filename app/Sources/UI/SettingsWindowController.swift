@@ -515,11 +515,11 @@ private final class AccountCellView: NSTableCellView {
 
     func configure(session: DashboardSession?) {
         imageTask?.cancel()
-        nameLabel.stringValue = session?.userEmail ?? "Cloudflare"
-        emailLabel.stringValue = session?.accountID ?? ""
+        nameLabel.stringValue = session?.displayUserDisplayName ?? session?.displayUserEmail ?? "Cloudflare"
+        emailLabel.stringValue = session?.displayAccountID ?? ""
         avatarView.image = NSImage(systemSymbolName: "person.crop.circle.fill", accessibilityDescription: nil)
 
-        guard let rawURL = session?.userAvatarURL, let url = URL(string: rawURL) else {
+        guard let rawURL = session?.displayUserAvatarURL, let url = URL(string: rawURL) else {
             return
         }
 

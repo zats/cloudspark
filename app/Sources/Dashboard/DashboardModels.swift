@@ -11,25 +11,74 @@ enum DashboardDemoMode {
         return ["1", "true", "yes", "on"].contains(value)
     }()
 
-    static func displayProjectName(_ name: String) -> String {
-        guard isEnabled else {
-            return name
-        }
-        return name.replacingOccurrences(of: "lorica", with: "acme")
-    }
-
-    static func displayEmail(_ email: String?) -> String? {
-        guard let email, isEnabled else {
-            return email
-        }
-        return email.replacingOccurrences(of: "@getlorica.com", with: "@acme.com")
-    }
-
-    static func displayObservabilityText(_ text: String) -> String {
+    static func displayText(_ text: String) -> String {
         guard isEnabled else {
             return text
         }
-        return text.replacingOccurrences(of: "lorica", with: "acme", options: [.caseInsensitive])
+        var value = text
+            .replacingOccurrences(of: "getlorica", with: "acme", options: [.caseInsensitive])
+            .replacingOccurrences(of: "lorica", with: "acme", options: [.caseInsensitive])
+
+        value = value.replacingOccurrences(
+            of: #"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}"#,
+            with: "demo@acme.com",
+            options: [.regularExpression, .caseInsensitive]
+        )
+
+        value = value.replacingOccurrences(
+            of: #"https?://[^\s]+"#,
+            with: "https://demo.acme.com",
+            options: [.regularExpression, .caseInsensitive]
+        )
+
+        return value
+    }
+
+    static func displayText(_ text: String?) -> String? {
+        guard let text else { return nil }
+        return displayText(text)
+    }
+
+    static func displayProjectName(_ name: String) -> String {
+        displayText(name)
+    }
+
+    static func displayEmail(_ email: String?) -> String? {
+        guard let email else { return nil }
+        if isEnabled {
+            return "demo@acme.com"
+        }
+        return email
+    }
+
+    static func displayAccountID(_ accountID: String?) -> String? {
+        guard let accountID else { return nil }
+        if isEnabled {
+            return "demo-account"
+        }
+        return accountID
+    }
+
+    static func displaySecondaryText(_ text: String?) -> String? {
+        guard let text else { return nil }
+        if isEnabled {
+            return displayText(text)
+        }
+        return text
+    }
+
+    static func displayAvatarURL(_ url: String?) -> String? {
+        guard let url else { return nil }
+        return isEnabled ? nil : url
+    }
+
+    static func displayObservabilityText(_ text: String) -> String {
+        displayText(text)
+    }
+
+    static func displayFilenameComponent(_ text: String) -> String {
+        let value = displayText(text)
+        return value.replacingOccurrences(of: "/", with: "-")
     }
 }
 
@@ -99,6 +148,22 @@ struct DashboardSession: Codable {
             return accountID
         }
         return xAtok
+    }
+
+    var displayUserEmail: String? {
+        DashboardDemoMode.displayEmail(userEmail)
+    }
+
+    var displayUserDisplayName: String? {
+        DashboardDemoMode.displayText(userDisplayName)
+    }
+
+    var displayAccountID: String? {
+        DashboardDemoMode.displayAccountID(accountID)
+    }
+
+    var displayUserAvatarURL: String? {
+        DashboardDemoMode.displayAvatarURL(userAvatarURL)
     }
 }
 
@@ -221,6 +286,14 @@ struct DashboardProject: Equatable {
 
     var displayAccountEmail: String? {
         DashboardDemoMode.displayEmail(accountEmail)
+    }
+
+    var displaySubtitle: String? {
+        DashboardDemoMode.displaySecondaryText(subtitle)
+    }
+
+    var displayLatestBranch: String? {
+        DashboardDemoMode.displaySecondaryText(latestBranch)
     }
 
     var statusKind: DashboardStatusKind {

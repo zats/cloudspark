@@ -998,7 +998,7 @@ final class ObservabilityWindowController: NSWindowController, NSTableViewDataSo
         let fieldKeys = visibleFieldKeys()
         let panel = NSSavePanel()
         panel.canCreateDirectories = true
-        panel.nameFieldStringValue = "\(project.name)-\(currentView.title.lowercased())-rows.\(format.fileExtension)"
+        panel.nameFieldStringValue = "\(DashboardDemoMode.displayFilenameComponent(project.name))-\(currentView.title.lowercased())-rows.\(format.fileExtension)"
         panel.allowedContentTypes = [format.contentType]
 
         guard panel.runModal() == .OK, let url = panel.url else {
