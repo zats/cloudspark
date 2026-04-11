@@ -301,6 +301,8 @@ final class WorkerMetricsViewModel: ObservableObject {
 
     private var sessionsByAccountID: [String: DashboardSession]
     private var loadTask: Task<Void, Never>?
+    private var cachedVersionOptions: [DashboardWorkerVersionOption] = []
+    private var cachedActiveVersionOptions: [DashboardWorkerVersionOption] = []
 
     init(project: DashboardProject, session: DashboardSession, workers: [DashboardProject], sessions: [DashboardSession]) {
         self.workers = workers.filter { $0.kind == .worker }
@@ -323,11 +325,11 @@ final class WorkerMetricsViewModel: ObservableObject {
     }
 
     var versionOptions: [DashboardWorkerVersionOption] {
-        snapshot?.versionOptions ?? []
+        snapshot?.versionOptions ?? cachedVersionOptions
     }
 
     var activeVersionOptions: [DashboardWorkerVersionOption] {
-        snapshot?.activeVersionOptions ?? []
+        snapshot?.activeVersionOptions ?? cachedActiveVersionOptions
     }
 
     private var selectedVersionIDs: [String]? {
@@ -387,7 +389,7 @@ final class WorkerMetricsViewModel: ObservableObject {
         selectedWorkerID = workerID
         selectedVersionMode = .allDeployed
         selectedSpecificVersionID = nil
-        snapshot = nil
+        beginReload()
         onStateChange?()
         reload()
     }
@@ -395,6 +397,7 @@ final class WorkerMetricsViewModel: ObservableObject {
     func selectRange(_ preset: DashboardMetricsRangePreset) {
         guard selectedRangePreset != preset else { return }
         selectedRangePreset = preset
+        beginReload()
         onStateChange?()
         reload()
     }
@@ -405,6 +408,7 @@ final class WorkerMetricsViewModel: ObservableObject {
         if mode == .specific, selectedSpecificVersionID == nil {
             selectedSpecificVersionID = versionOptions.first?.id
         }
+        beginReload()
         onStateChange?()
         reload()
     }
@@ -413,6 +417,7 @@ final class WorkerMetricsViewModel: ObservableObject {
         guard selectedSpecificVersionID != versionID || selectedVersionMode != .specific else { return }
         selectedVersionMode = .specific
         selectedSpecificVersionID = versionID
+        beginReload()
         onStateChange?()
         reload()
     }
@@ -443,8 +448,7 @@ final class WorkerMetricsViewModel: ObservableObject {
     func reload() {
         guard let session = selectedSession else { return }
         loadTask?.cancel()
-        isLoading = true
-        errorMessage = nil
+        beginReload()
         onStateChange?()
         let worker = selectedProject
         let timeframe = selectedRangePreset.timeframe()
@@ -461,6 +465,8 @@ final class WorkerMetricsViewModel: ObservableObject {
                     selectedVersionIDs: selectedVersionIDs
                 )
                 guard !Task.isCancelled else { return }
+                self.cachedVersionOptions = snapshot.versionOptions
+                self.cachedActiveVersionOptions = snapshot.activeVersionOptions
                 self.snapshot = snapshot
                 if self.selectedVersionMode == .specific,
                    let selectedSpecificVersionID = self.selectedSpecificVersionID,
@@ -478,5 +484,12 @@ final class WorkerMetricsViewModel: ObservableObject {
                 self.onStateChange?()
             }
         }
+    }
+
+    private func beginReload() {
+        snapshot = nil
+        isLoading = true
+        errorMessage = nil
+        subrequestPage = 0
     }
 }
