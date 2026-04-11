@@ -777,7 +777,16 @@ final class StatusController: NSObject, NSMenuDelegate {
                 if isFavorite(lhs.project) != isFavorite(rhs.project) {
                     return isFavorite(lhs.project)
                 }
-                return (lhs.changedAt ?? .distantPast) > (rhs.changedAt ?? .distantPast)
+                let lhsDate = lhs.changedAt ?? .distantPast
+                let rhsDate = rhs.changedAt ?? .distantPast
+                if abs(lhsDate.timeIntervalSince(rhsDate)) <= 2 {
+                    let nameOrder = lhs.project.displayName.localizedCaseInsensitiveCompare(rhs.project.displayName)
+                    if nameOrder != .orderedSame {
+                        return nameOrder == .orderedAscending
+                    }
+                    return lhs.project.id < rhs.project.id
+                }
+                return lhsDate > rhsDate
             }
     }
 
