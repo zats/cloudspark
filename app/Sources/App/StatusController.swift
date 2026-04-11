@@ -47,7 +47,6 @@ final class StatusController: NSObject, NSMenuDelegate {
     private let summaryItem = NSMenuItem(title: "Cloudflare", action: nil, keyEquivalent: "")
     private let summarySectionSeparatorItem = NSMenuItem.separator()
     private let workersPagesItem = NSMenuItem(title: "Workers", action: nil, keyEquivalent: "")
-    private let metricsItem = NSMenuItem(title: "Metrics", action: #selector(openMetricsFromMenu), keyEquivalent: "")
     private let refreshItem = NSMenuItem(title: "Refresh", action: #selector(refreshBuilds), keyEquivalent: "r")
     private let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
     private let checkForUpdatesItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
@@ -120,8 +119,6 @@ final class StatusController: NSObject, NSMenuDelegate {
         workersPagesItem.submenu = workersPagesMenu
         workersPagesMenu.delegate = self
         menu.addItem(workersPagesItem)
-        metricsItem.target = self
-        menu.addItem(metricsItem)
 
         for item in [refreshItem, checkForUpdatesItem, settingsItem] {
             item.target = self
@@ -138,7 +135,6 @@ final class StatusController: NSObject, NSMenuDelegate {
     private func syncMenuState() {
         let hasSession = !sessions.isEmpty || !((try? DashboardSessionStore.loadAll()) ?? []).isEmpty
         workersPagesItem.isEnabled = hasSession
-        metricsItem.isEnabled = hasSession && projects.contains(where: { $0.kind == .worker })
         refreshItem.isEnabled = hasSession
         checkForUpdatesItem.isEnabled = updateController.isAvailable
     }
