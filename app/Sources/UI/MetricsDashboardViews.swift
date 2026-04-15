@@ -2,9 +2,9 @@ import Charts
 import Foundation
 import SwiftUI
 
-struct MetricsDashboardContentView: View {
+struct WorkerMetricsDashboardContentView: View {
     let snapshot: DashboardWorkerMetricsSnapshot
-    @ObservedObject var viewModel: WorkerMetricsViewModel
+    @ObservedObject var viewModel: MetricsViewModel
     let topColumns: [GridItem]
     let twoColumnGrid: [GridItem]
     let threeColumnGrid: [GridItem]
@@ -77,6 +77,47 @@ struct MetricsDashboardContentView: View {
                     }
                     MetricsCard(title: snapshot.requestDurationChart.title) {
                         MetricsTimeSeriesChart(chart: snapshot.requestDurationChart)
+                    }
+                }
+            }
+            .padding(14)
+        }
+    }
+}
+
+struct PageMetricsDashboardContentView: View {
+    let snapshot: DashboardPageMetricsSnapshot
+    let topColumns: [GridItem]
+    let twoColumnGrid: [GridItem]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                LazyVGrid(columns: topColumns, spacing: 12) {
+                    ForEach(snapshot.summaries) { summary in
+                        MetricsSummaryCard(summary: summary)
+                    }
+                }
+
+                MetricsCard(title: "Latest deployment") {
+                    PageDeploymentCard(deployment: snapshot.latestDeployment)
+                }
+
+                LazyVGrid(columns: twoColumnGrid, spacing: 12) {
+                    MetricsCard(title: snapshot.requestsChart.title) {
+                        MetricsTimeSeriesChart(chart: snapshot.requestsChart)
+                    }
+                    MetricsCard(title: snapshot.invocationStatusChart.title) {
+                        MetricsTimeSeriesChart(chart: snapshot.invocationStatusChart)
+                    }
+                }
+
+                LazyVGrid(columns: twoColumnGrid, spacing: 12) {
+                    MetricsCard(title: snapshot.cpuTimeChart.title) {
+                        MetricsTimeSeriesChart(chart: snapshot.cpuTimeChart)
+                    }
+                    MetricsCard(title: snapshot.durationChart.title) {
+                        MetricsTimeSeriesChart(chart: snapshot.durationChart)
                     }
                 }
             }
@@ -163,6 +204,41 @@ struct ActiveDeploymentCard: View {
                 Divider()
             }
         }
+    }
+}
+
+struct PageDeploymentCard: View {
+    let deployment: DashboardPageDeployment?
+
+    var body: some View {
+        if let deployment {
+            HStack(spacing: 20) {
+                pageDeploymentField("Deployment", deployment.id ?? "—")
+                pageDeploymentField("Status", prettifyDeploymentStatus(deployment.latestStatus))
+                pageDeploymentField("Branch", DashboardDemoMode.displaySecondaryText(deployment.latestBranch) ?? "—")
+                pageDeploymentField("Updated", deployment.lastReleaseAt.map { RelativeTime.shortString(since: $0) } ?? "—")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            Text("No deployment data")
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func pageDeploymentField(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(size: 13, weight: .medium))
+        }
+    }
+
+    private func prettifyDeploymentStatus(_ value: String?) -> String {
+        guard let value, !value.isEmpty else { return "—" }
+        return value.replacingOccurrences(of: "_", with: " ").capitalized
     }
 }
 

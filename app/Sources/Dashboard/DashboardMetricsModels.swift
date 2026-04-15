@@ -178,6 +178,20 @@ struct DashboardWorkerMetricsSnapshot: Equatable {
     let placementPerformance: [DashboardPlacementPerformanceRow]
 }
 
+struct DashboardPageMetricsSnapshot: Equatable {
+    let latestDeployment: DashboardPageDeployment?
+    let summaries: [DashboardMetricsSummaryCardData]
+    let requestsChart: DashboardMetricsChartData
+    let invocationStatusChart: DashboardMetricsChartData
+    let cpuTimeChart: DashboardMetricsChartData
+    let durationChart: DashboardMetricsChartData
+}
+
+enum DashboardMetricsSnapshot: Equatable {
+    case worker(DashboardWorkerMetricsSnapshot)
+    case page(DashboardPageMetricsSnapshot)
+}
+
 enum DashboardSubrequestStatusFilter: String, CaseIterable, Identifiable {
     case all
     case status2xx

@@ -6,16 +6,20 @@ import SwiftUI
 final class MetricsWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate {
     var onClose: (() -> Void)?
 
-    private let viewModel: WorkerMetricsViewModel
-    private let workerControl = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let viewModel: MetricsViewModel
+    private let projectControl = NSPopUpButton(frame: .zero, pullsDown: false)
     private let versionModeControl = NSPopUpButton(frame: .zero, pullsDown: false)
     private let specificVersionControl = NSPopUpButton(frame: .zero, pullsDown: false)
     private let timeframeControl = NSPopUpButton(frame: .zero, pullsDown: false)
     private let toolbar = NSToolbar(identifier: "metrics.window.toolbar")
-    private var isSelectingWorker = false
+    private var projectWidthConstraint: NSLayoutConstraint?
+    private var versionModeWidthConstraint: NSLayoutConstraint?
+    private var specificVersionWidthConstraint: NSLayoutConstraint?
+    private var timeframeWidthConstraint: NSLayoutConstraint?
+    private var isSelectingProject = false
 
-    init(project: DashboardProject, session: DashboardSession, workers: [DashboardProject], sessions: [DashboardSession]) {
-        self.viewModel = WorkerMetricsViewModel(project: project, session: session, workers: workers, sessions: sessions)
+    init(project: DashboardProject, session: DashboardSession, projects: [DashboardProject], sessions: [DashboardSession]) {
+        self.viewModel = MetricsViewModel(project: project, session: session, projects: projects, sessions: sessions)
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1280, height: 860),
@@ -33,7 +37,7 @@ final class MetricsWindowController: NSWindowController, NSWindowDelegate, NSToo
         toolbar.allowsUserCustomization = false
         super.init(window: window)
 
-        let hostingView = NSHostingView(rootView: WorkerMetricsWindowView(viewModel: viewModel))
+        let hostingView = NSHostingView(rootView: MetricsWindowView(viewModel: viewModel))
         hostingView.translatesAutoresizingMaskIntoConstraints = false
         window.contentView = NSView()
         window.contentView?.addSubview(hostingView)
@@ -67,11 +71,12 @@ final class MetricsWindowController: NSWindowController, NSWindowDelegate, NSToo
         viewModel.reloadIfNeeded()
     }
 
-    func updateWorkers(_ workers: [DashboardProject], sessions: [DashboardSession], selectedProjectID: String? = nil) {
-        viewModel.updateWorkers(workers, sessions: sessions, selectedProjectID: selectedProjectID)
-        rebuildWorkerControl()
+    func updateProjects(_ projects: [DashboardProject], sessions: [DashboardSession], selectedProjectID: String? = nil) {
+        viewModel.updateProjects(projects, sessions: sessions, selectedProjectID: selectedProjectID)
+        rebuildProjectControl()
         rebuildVersionControls()
         syncTimeframeSelection()
+        syncToolbarForProjectKind()
         syncWindowTitle()
     }
 
@@ -84,7 +89,7 @@ final class MetricsWindowController: NSWindowController, NSWindowDelegate, NSToo
     }
 
     private enum ToolbarItemID {
-        static let worker = NSToolbarItem.Identifier("metrics.worker")
+        static let project = NSToolbarItem.Identifier("metrics.project")
         static let versionMode = NSToolbarItem.Identifier("metrics.version-mode")
         static let specificVersion = NSToolbarItem.Identifier("metrics.specific-version")
         static let timeframe = NSToolbarItem.Identifier("metrics.timeframe")
@@ -93,7 +98,7 @@ final class MetricsWindowController: NSWindowController, NSWindowDelegate, NSToo
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
         [
-            ToolbarItemID.worker,
+            ToolbarItemID.project,
             ToolbarItemID.versionMode,
             ToolbarItemID.specificVersion,
             ToolbarItemID.timeframe,
@@ -104,7 +109,7 @@ final class MetricsWindowController: NSWindowController, NSWindowDelegate, NSToo
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
         [
-            ToolbarItemID.worker,
+            ToolbarItemID.project,
             ToolbarItemID.versionMode,
             ToolbarItemID.specificVersion,
             ToolbarItemID.timeframe,
@@ -119,11 +124,11 @@ final class MetricsWindowController: NSWindowController, NSWindowDelegate, NSToo
         willBeInsertedIntoToolbar flag: Bool
     ) -> NSToolbarItem? {
         switch itemIdentifier {
-        case ToolbarItemID.worker:
+        case ToolbarItemID.project:
             let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-            item.label = "Worker"
-            item.paletteLabel = "Worker"
-            item.view = workerControl
+            item.label = "Project"
+            item.paletteLabel = "Project"
+            item.view = projectControl
             return item
         case ToolbarItemID.versionMode:
             let item = NSToolbarItem(itemIdentifier: itemIdentifier)
@@ -158,9 +163,9 @@ final class MetricsWindowController: NSWindowController, NSWindowDelegate, NSToo
     }
 
     private func configure() {
-        workerControl.target = self
-        workerControl.action = #selector(changeWorker)
-        workerControl.toolTip = "Worker"
+        projectControl.target = self
+        projectControl.action = #selector(changeProject)
+        projectControl.toolTip = "Project"
 
         versionModeControl.target = self
         versionModeControl.action = #selector(changeVersionMode)
@@ -175,39 +180,45 @@ final class MetricsWindowController: NSWindowController, NSWindowDelegate, NSToo
         timeframeControl.action = #selector(changeTimeframe)
         timeframeControl.toolTip = "Timeframe"
 
+        projectWidthConstraint = projectControl.widthAnchor.constraint(equalToConstant: 220)
+        versionModeWidthConstraint = versionModeControl.widthAnchor.constraint(equalToConstant: 190)
+        specificVersionWidthConstraint = specificVersionControl.widthAnchor.constraint(equalToConstant: 140)
+        timeframeWidthConstraint = timeframeControl.widthAnchor.constraint(equalToConstant: 84)
         NSLayoutConstraint.activate([
-            workerControl.widthAnchor.constraint(equalToConstant: 220),
-            versionModeControl.widthAnchor.constraint(equalToConstant: 190),
-            specificVersionControl.widthAnchor.constraint(equalToConstant: 140),
-            timeframeControl.widthAnchor.constraint(equalToConstant: 84),
+            projectWidthConstraint!,
+            versionModeWidthConstraint!,
+            specificVersionWidthConstraint!,
+            timeframeWidthConstraint!,
         ])
 
         DashboardMetricsVersionFilterMode.allCases.forEach { versionModeControl.addItem(withTitle: $0.title) }
         viewModel.onStateChange = { [weak self] in
             self?.syncFromViewModel()
         }
-        rebuildWorkerControl()
+        rebuildProjectControl()
         rebuildVersionControls()
         syncTimeframeSelection()
+        syncToolbarForProjectKind()
     }
 
     private func syncFromViewModel() {
         syncWindowTitle()
-        rebuildWorkerControl()
+        rebuildProjectControl()
         rebuildVersionControls()
         syncTimeframeSelection()
+        syncToolbarForProjectKind()
     }
 
-    private func rebuildWorkerControl() {
-        isSelectingWorker = true
-        defer { isSelectingWorker = false }
-        workerControl.removeAllItems()
-        for worker in viewModel.workers {
-            workerControl.addItem(withTitle: worker.displayName)
-            workerControl.lastItem?.representedObject = worker.id
+    private func rebuildProjectControl() {
+        isSelectingProject = true
+        defer { isSelectingProject = false }
+        projectControl.removeAllItems()
+        for project in viewModel.projects {
+            projectControl.addItem(withTitle: project.displayName)
+            projectControl.lastItem?.representedObject = project.id
         }
-        if let index = viewModel.workers.firstIndex(where: { $0.id == viewModel.selectedWorkerID }) {
-            workerControl.selectItem(at: index)
+        if let index = viewModel.projects.firstIndex(where: { $0.id == viewModel.selectedProjectID }) {
+            projectControl.selectItem(at: index)
         }
     }
 
@@ -232,8 +243,20 @@ final class MetricsWindowController: NSWindowController, NSWindowDelegate, NSToo
         } else {
             specificVersionControl.selectItem(at: 0)
         }
-        specificVersionControl.isEnabled = viewModel.selectedVersionMode == .specific
-        specificVersionControl.alphaValue = viewModel.selectedVersionMode == .specific ? 1 : 0.55
+
+        let showWorkerVersionControls = viewModel.selectedProject.kind == .worker
+        versionModeControl.isEnabled = showWorkerVersionControls
+        specificVersionControl.isEnabled = showWorkerVersionControls && viewModel.selectedVersionMode == .specific
+        versionModeControl.alphaValue = showWorkerVersionControls ? 1 : 0
+        specificVersionControl.alphaValue = (showWorkerVersionControls && viewModel.selectedVersionMode == .specific) ? 1 : 0
+    }
+
+    private func syncToolbarForProjectKind() {
+        let isWorker = viewModel.selectedProject.kind == .worker
+        versionModeControl.isHidden = !isWorker
+        specificVersionControl.isHidden = !isWorker || viewModel.selectedVersionMode != .specific
+        versionModeWidthConstraint?.constant = isWorker ? 190 : 0
+        specificVersionWidthConstraint?.constant = (isWorker && viewModel.selectedVersionMode == .specific) ? 140 : 0
     }
 
     private func syncTimeframeSelection() {
@@ -243,13 +266,13 @@ final class MetricsWindowController: NSWindowController, NSWindowDelegate, NSToo
     }
 
     @objc
-    private func changeWorker() {
-        guard !isSelectingWorker,
-              let projectID = workerControl.selectedItem?.representedObject as? String
+    private func changeProject() {
+        guard !isSelectingProject,
+              let projectID = projectControl.selectedItem?.representedObject as? String
         else {
             return
         }
-        viewModel.selectWorker(projectID)
+        viewModel.selectProject(projectID)
     }
 
     @objc
@@ -285,13 +308,13 @@ final class MetricsWindowController: NSWindowController, NSWindowDelegate, NSToo
 }
 
 @MainActor
-final class WorkerMetricsViewModel: ObservableObject {
-    @Published var workers: [DashboardProject]
-    @Published var selectedWorkerID: String
+final class MetricsViewModel: ObservableObject {
+    @Published var projects: [DashboardProject]
+    @Published var selectedProjectID: String
     @Published var selectedRangePreset: DashboardMetricsRangePreset = .last24Hours
     @Published var selectedVersionMode: DashboardMetricsVersionFilterMode = .allDeployed
     @Published var selectedSpecificVersionID: String?
-    @Published var snapshot: DashboardWorkerMetricsSnapshot?
+    @Published var snapshot: DashboardMetricsSnapshot?
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var subrequestStatusFilter: DashboardSubrequestStatusFilter = .all
@@ -304,9 +327,9 @@ final class WorkerMetricsViewModel: ObservableObject {
     private var cachedVersionOptions: [DashboardWorkerVersionOption] = []
     private var cachedActiveVersionOptions: [DashboardWorkerVersionOption] = []
 
-    init(project: DashboardProject, session: DashboardSession, workers: [DashboardProject], sessions: [DashboardSession]) {
-        self.workers = workers.filter { $0.kind == .worker }
-        self.selectedWorkerID = project.id
+    init(project: DashboardProject, session: DashboardSession, projects: [DashboardProject], sessions: [DashboardSession]) {
+        self.projects = projects.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+        self.selectedProjectID = project.id
         self.sessionsByAccountID = Dictionary(uniqueKeysWithValues: sessions.compactMap {
             guard let accountID = $0.accountID else { return nil }
             return (accountID, $0)
@@ -317,7 +340,7 @@ final class WorkerMetricsViewModel: ObservableObject {
     }
 
     var selectedProject: DashboardProject {
-        workers.first(where: { $0.id == selectedWorkerID }) ?? workers[0]
+        projects.first(where: { $0.id == selectedProjectID }) ?? projects[0]
     }
 
     private var selectedSession: DashboardSession? {
@@ -325,26 +348,32 @@ final class WorkerMetricsViewModel: ObservableObject {
     }
 
     var versionOptions: [DashboardWorkerVersionOption] {
-        snapshot?.versionOptions ?? cachedVersionOptions
+        cachedWorkerSnapshot?.versionOptions ?? cachedVersionOptions
     }
 
     var activeVersionOptions: [DashboardWorkerVersionOption] {
-        snapshot?.activeVersionOptions ?? cachedActiveVersionOptions
+        cachedWorkerSnapshot?.activeVersionOptions ?? cachedActiveVersionOptions
+    }
+
+    private var cachedWorkerSnapshot: DashboardWorkerMetricsSnapshot? {
+        guard case let .worker(snapshot)? = snapshot else { return nil }
+        return snapshot
     }
 
     private var selectedVersionIDs: [String]? {
+        guard selectedProject.kind == .worker else { return nil }
         switch selectedVersionMode {
         case .allDeployed:
-            nil
+            return nil
         case .activeDeployed:
-            activeVersionOptions.map(\.id)
+            return activeVersionOptions.map(\.id)
         case .specific:
-            selectedSpecificVersionID.map { [$0] } ?? []
+            return selectedSpecificVersionID.map { [$0] } ?? []
         }
     }
 
     var visibleSubrequests: [DashboardWorkerSubrequestRow] {
-        guard let snapshot else { return [] }
+        guard let snapshot = cachedWorkerSnapshot else { return [] }
         let trimmedQuery = subrequestSearch.trimmingCharacters(in: .whitespacesAndNewlines)
         return snapshot.subrequests.filter { row in
             let matchesSearch = trimmedQuery.isEmpty || row.host.localizedCaseInsensitiveContains(trimmedQuery)
@@ -367,26 +396,26 @@ final class WorkerMetricsViewModel: ObservableObject {
         max(1, Int(ceil(Double(visibleSubrequests.count) / 12.0)))
     }
 
-    func updateWorkers(_ workers: [DashboardProject], sessions: [DashboardSession], selectedProjectID: String?) {
-        self.workers = workers.filter { $0.kind == .worker }
+    func updateProjects(_ projects: [DashboardProject], sessions: [DashboardSession], selectedProjectID: String?) {
+        self.projects = projects.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
         self.sessionsByAccountID = Dictionary(uniqueKeysWithValues: sessions.compactMap {
             guard let accountID = $0.accountID else { return nil }
             return (accountID, $0)
         })
 
         if let selectedProjectID,
-           self.workers.contains(where: { $0.id == selectedProjectID }) {
-            selectedWorkerID = selectedProjectID
-        } else if !self.workers.contains(where: { $0.id == selectedWorkerID }),
-                  let first = self.workers.first {
-            selectedWorkerID = first.id
+           self.projects.contains(where: { $0.id == selectedProjectID }) {
+            self.selectedProjectID = selectedProjectID
+        } else if !self.projects.contains(where: { $0.id == self.selectedProjectID }),
+                  let first = self.projects.first {
+            self.selectedProjectID = first.id
         }
         onStateChange?()
     }
 
-    func selectWorker(_ workerID: String) {
-        guard selectedWorkerID != workerID else { return }
-        selectedWorkerID = workerID
+    func selectProject(_ projectID: String) {
+        guard selectedProjectID != projectID else { return }
+        selectedProjectID = projectID
         selectedVersionMode = .allDeployed
         selectedSpecificVersionID = nil
         beginReload()
@@ -403,7 +432,7 @@ final class WorkerMetricsViewModel: ObservableObject {
     }
 
     func selectVersionMode(_ mode: DashboardMetricsVersionFilterMode) {
-        guard selectedVersionMode != mode else { return }
+        guard selectedProject.kind == .worker, selectedVersionMode != mode else { return }
         selectedVersionMode = mode
         if mode == .specific, selectedSpecificVersionID == nil {
             selectedSpecificVersionID = versionOptions.first?.id
@@ -414,7 +443,11 @@ final class WorkerMetricsViewModel: ObservableObject {
     }
 
     func selectSpecificVersion(_ versionID: String) {
-        guard selectedSpecificVersionID != versionID || selectedVersionMode != .specific else { return }
+        guard selectedProject.kind == .worker,
+              selectedSpecificVersionID != versionID || selectedVersionMode != .specific
+        else {
+            return
+        }
         selectedVersionMode = .specific
         selectedSpecificVersionID = versionID
         beginReload()
@@ -450,7 +483,7 @@ final class WorkerMetricsViewModel: ObservableObject {
         loadTask?.cancel()
         beginReload()
         onStateChange?()
-        let worker = selectedProject
+        let project = selectedProject
         let timeframe = selectedRangePreset.timeframe()
         let selectedVersionIDs = selectedVersionIDs
 
@@ -458,21 +491,33 @@ final class WorkerMetricsViewModel: ObservableObject {
             guard let self else { return }
             do {
                 let client = DashboardAPIClient(session: session)
-                let snapshot = try await client.fetchWorkerMetrics(
-                    accountID: worker.accountID,
-                    workerName: worker.name,
-                    timeframe: timeframe,
-                    selectedVersionIDs: selectedVersionIDs
-                )
-                guard !Task.isCancelled else { return }
-                self.cachedVersionOptions = snapshot.versionOptions
-                self.cachedActiveVersionOptions = snapshot.activeVersionOptions
-                self.snapshot = snapshot
-                if self.selectedVersionMode == .specific,
-                   let selectedSpecificVersionID = self.selectedSpecificVersionID,
-                   !snapshot.versionOptions.contains(where: { $0.id == selectedSpecificVersionID }) {
-                    self.selectedSpecificVersionID = snapshot.versionOptions.first?.id
+                let nextSnapshot: DashboardMetricsSnapshot
+                switch project.kind {
+                case .worker:
+                    let workerSnapshot = try await client.fetchWorkerMetrics(
+                        accountID: project.accountID,
+                        workerName: project.name,
+                        timeframe: timeframe,
+                        selectedVersionIDs: selectedVersionIDs
+                    )
+                    self.cachedVersionOptions = workerSnapshot.versionOptions
+                    self.cachedActiveVersionOptions = workerSnapshot.activeVersionOptions
+                    if self.selectedVersionMode == .specific,
+                       let selectedSpecificVersionID = self.selectedSpecificVersionID,
+                       !workerSnapshot.versionOptions.contains(where: { $0.id == selectedSpecificVersionID }) {
+                        self.selectedSpecificVersionID = workerSnapshot.versionOptions.first?.id
+                    }
+                    nextSnapshot = .worker(workerSnapshot)
+                case .page:
+                    let pageSnapshot = try await client.fetchPageMetrics(
+                        accountID: project.accountID,
+                        projectName: project.name,
+                        timeframe: timeframe
+                    )
+                    nextSnapshot = .page(pageSnapshot)
                 }
+                guard !Task.isCancelled else { return }
+                self.snapshot = nextSnapshot
                 self.subrequestPage = 0
                 self.isLoading = false
                 self.onStateChange?()

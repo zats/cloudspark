@@ -703,6 +703,52 @@ final class DashboardAPIClient: @unchecked Sendable {
         )
     }
 
+    func fetchPageMetrics(
+        accountID: String,
+        projectName: String,
+        timeframe: DashboardMetricsTimeframe
+    ) async throws -> DashboardPageMetricsSnapshot {
+        async let latestDeployment = fetchPageDeployment(accountID: accountID, projectName: projectName)
+        async let summaries = fetchPageMetricsSummaries(
+            accountID: accountID,
+            projectName: projectName,
+            timeframe: timeframe
+        )
+        async let requestsChart = fetchPageRequestsChart(
+            accountID: accountID,
+            projectName: projectName,
+            timeframe: timeframe
+        )
+        async let invocationStatusChart = fetchPageInvocationStatusChart(
+            accountID: accountID,
+            projectName: projectName,
+            timeframe: timeframe
+        )
+        async let cpuTimeChart = fetchPagePercentileChart(
+            accountID: accountID,
+            projectName: projectName,
+            timeframe: timeframe,
+            title: "CPU Time",
+            quantileFields: ["cpuTimeP50", "cpuTimeP90", "cpuTimeP99", "cpuTimeP999"]
+        )
+        async let durationChart = fetchPagePercentileChart(
+            accountID: accountID,
+            projectName: projectName,
+            timeframe: timeframe,
+            title: "Duration",
+            quantileFields: ["durationP50", "durationP90", "durationP99", "durationP999"]
+        )
+
+        return try await DashboardPageMetricsSnapshot(
+            latestDeployment: latestDeployment,
+            summaries: summaries,
+            requestsChart: requestsChart,
+            invocationStatusChart: invocationStatusChart,
+            cpuTimeChart: cpuTimeChart,
+            durationChart: durationChart
+        )
+    }
+
     private func listWorkerDeployments(accountID: String, workerName: String) async throws -> [DashboardWorkerDeploymentRecord] {
         guard let escapedWorkerName = workerName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
             throw DashboardError.invalidResponse
@@ -1459,11 +1505,386 @@ final class DashboardAPIClient: @unchecked Sendable {
         }
     }
 
+    private func fetchPageMetricsSummaries(
+        accountID: String,
+        projectName: String,
+        timeframe: DashboardMetricsTimeframe
+    ) async throws -> [DashboardMetricsSummaryCardData] {
+        let body: [String: Any] = [
+            "operationName": "GetPagesFunctionAnalytics",
+            "variables": pageMetricsVariables(
+                accountID: accountID,
+                projectName: projectName,
+                timeframe: timeframe,
+                includeLookback: true
+            ),
+            "query": """
+            query GetPagesFunctionAnalytics($accountTag: string!, $lookbackTime: Time, $datetimeStart: Time, $datetimeEnd: Time, $scriptName: string) {
+              viewer {
+                accounts(filter: {accountTag: $accountTag}) {
+                  current: pagesFunctionsInvocationsAdaptiveGroups(limit: 10000, filter: {scriptName: $scriptName, datetime_geq: $datetimeStart, datetime_leq: $datetimeEnd}) {
+                    sum {
+                      requests
+                      subrequests
+                      errors
+                      __typename
+                    }
+                    quantiles {
+                      cpuTimeP50
+                      durationP50
+                      __typename
+                    }
+                    dimensions {
+                      scriptName
+                      __typename
+                    }
+                    __typename
+                  }
+                  previous: pagesFunctionsInvocationsAdaptiveGroups(limit: 10000, filter: {scriptName: $scriptName, datetime_geq: $lookbackTime, datetime_leq: $datetimeStart}) {
+                    sum {
+                      requests
+                      subrequests
+                      errors
+                      __typename
+                    }
+                    quantiles {
+                      cpuTimeP50
+                      durationP50
+                      __typename
+                    }
+                    __typename
+                  }
+                  byStatus: pagesFunctionsInvocationsAdaptiveGroups(limit: 10000, filter: {scriptName: $scriptName, datetime_geq: $datetimeStart, datetime_leq: $datetimeEnd}) {
+                    sum {
+                      requests
+                      __typename
+                    }
+                    dimensions {
+                      status
+                      __typename
+                    }
+                    __typename
+                  }
+                  __typename
+                }
+                __typename
+              }
+            }
+            """
+        ]
+        let account = try await graphQLAccount(body: body)
+        let currentRows = account["current"] as? [[String: Any]] ?? []
+        let previousRows = account["previous"] as? [[String: Any]] ?? []
+        let statusRows = account["byStatus"] as? [[String: Any]] ?? []
+
+        let requests = currentRows.reduce(0) { $0 + intValue(($1["sum"] as? [String: Any])?["requests"]) }
+        let subrequests = currentRows.reduce(0) { $0 + intValue(($1["sum"] as? [String: Any])?["subrequests"]) }
+        let errors = currentRows.reduce(0) { $0 + intValue(($1["sum"] as? [String: Any])?["errors"]) }
+        let success = statusRows.reduce(0) { partial, row in
+            let dimensions = row["dimensions"] as? [String: Any] ?? [:]
+            let status = dimensions["status"] as? String ?? ""
+            guard isSuccessfulPageInvocationStatus(status) else { return partial }
+            return partial + intValue((row["sum"] as? [String: Any])?["requests"])
+        }
+        let cpuTimeMS = weightedQuantileAverage(rows: currentRows, field: "cpuTimeP50")
+        let durationMS = weightedQuantileAverage(rows: currentRows, field: "durationP50")
+
+        let previous = previousRows.first
+        let previousSum = previous?["sum"] as? [String: Any] ?? [:]
+        let previousQuantiles = previous?["quantiles"] as? [String: Any] ?? [:]
+
+        let previousRequests = intValue(previousSum["requests"])
+        let previousSubrequests = intValue(previousSum["subrequests"])
+        let previousErrors = intValue(previousSum["errors"])
+        let previousCPU = doubleValue(previousQuantiles["cpuTimeP50"]) / 1000
+        let previousDuration = doubleValue(previousQuantiles["durationP50"]) / 1000
+
+        return [
+            DashboardMetricsSummaryCardData(
+                id: "requests",
+                title: "Requests",
+                value: Double(requests),
+                unit: .count,
+                deltaRatio: deltaRatio(current: Double(requests), previous: Double(previousRequests))
+            ),
+            DashboardMetricsSummaryCardData(
+                id: "success",
+                title: "Success",
+                value: Double(success),
+                unit: .count,
+                deltaRatio: nil
+            ),
+            DashboardMetricsSummaryCardData(
+                id: "subrequests",
+                title: "Subrequests",
+                value: Double(subrequests),
+                unit: .count,
+                deltaRatio: deltaRatio(current: Double(subrequests), previous: Double(previousSubrequests))
+            ),
+            DashboardMetricsSummaryCardData(
+                id: "errors",
+                title: "Errors",
+                value: Double(errors),
+                unit: .count,
+                deltaRatio: deltaRatio(current: Double(errors), previous: Double(previousErrors))
+            ),
+            DashboardMetricsSummaryCardData(
+                id: "cpu",
+                title: "CPU Time",
+                value: cpuTimeMS,
+                unit: .milliseconds,
+                deltaRatio: deltaRatio(current: cpuTimeMS, previous: previousCPU)
+            ),
+            DashboardMetricsSummaryCardData(
+                id: "duration",
+                title: "Duration",
+                value: durationMS,
+                unit: .milliseconds,
+                deltaRatio: deltaRatio(current: durationMS, previous: previousDuration)
+            ),
+        ]
+    }
+
+    private func fetchPageRequestsChart(
+        accountID: String,
+        projectName: String,
+        timeframe: DashboardMetricsTimeframe
+    ) async throws -> DashboardMetricsChartData {
+        let bucketField = pageMetricsBucketField(for: timeframe)
+        let orderField = "\(bucketField)_ASC"
+
+        async let totalRows = graphQLRows(body: [
+            "operationName": "GetPagesFunctionRequests",
+            "variables": pageMetricsVariables(accountID: accountID, projectName: projectName, timeframe: timeframe),
+            "query": """
+            query GetPagesFunctionRequests($accountTag: string!, $datetimeStart: Time, $datetimeEnd: Time, $scriptName: string) {
+              viewer {
+                accounts(filter: {accountTag: $accountTag}) {
+                  pagesFunctionsInvocationsAdaptiveGroups(limit: 10000, filter: {scriptName: $scriptName, datetime_geq: $datetimeStart, datetime_leq: $datetimeEnd}, orderBy: [\(orderField)]) {
+                    sum {
+                      requests
+                      subrequests
+                      errors
+                      __typename
+                    }
+                    dimensions {
+                      \(bucketField)
+                      __typename
+                    }
+                    __typename
+                  }
+                  __typename
+                }
+                __typename
+              }
+            }
+            """
+        ], field: "pagesFunctionsInvocationsAdaptiveGroups")
+
+        async let statusRows = graphQLRows(body: [
+            "operationName": "GetPagesFunctionRequestsByStatus",
+            "variables": pageMetricsVariables(accountID: accountID, projectName: projectName, timeframe: timeframe),
+            "query": """
+            query GetPagesFunctionRequestsByStatus($accountTag: string!, $datetimeStart: Time, $datetimeEnd: Time, $scriptName: string) {
+              viewer {
+                accounts(filter: {accountTag: $accountTag}) {
+                  pagesFunctionsInvocationsAdaptiveGroups(limit: 10000, filter: {scriptName: $scriptName, datetime_geq: $datetimeStart, datetime_leq: $datetimeEnd}, orderBy: [\(orderField)]) {
+                    sum {
+                      requests
+                      __typename
+                    }
+                    dimensions {
+                      \(bucketField)
+                      status
+                      __typename
+                    }
+                    __typename
+                  }
+                  __typename
+                }
+                __typename
+              }
+            }
+            """
+        ], field: "pagesFunctionsInvocationsAdaptiveGroups")
+
+        let totals = try await totalRows
+        let statuses = try await statusRows
+
+        var totalByDate: [Date: Double] = [:]
+        var subrequestsByDate: [Date: Double] = [:]
+        var errorsByDate: [Date: Double] = [:]
+        for row in totals {
+            let dimensions = row["dimensions"] as? [String: Any] ?? [:]
+            guard let date = parseDate(dimensions[bucketField] as? String) else { continue }
+            let sum = row["sum"] as? [String: Any] ?? [:]
+            totalByDate[date] = doubleValue(sum["requests"])
+            subrequestsByDate[date] = doubleValue(sum["subrequests"])
+            errorsByDate[date] = doubleValue(sum["errors"])
+        }
+
+        var successByDate: [Date: Double] = [:]
+        for row in statuses {
+            let dimensions = row["dimensions"] as? [String: Any] ?? [:]
+            let status = dimensions["status"] as? String ?? ""
+            guard isSuccessfulPageInvocationStatus(status),
+                  let date = parseDate(dimensions[bucketField] as? String)
+            else {
+                continue
+            }
+            let sum = row["sum"] as? [String: Any] ?? [:]
+            successByDate[date, default: 0] += doubleValue(sum["requests"])
+        }
+
+        let allDates = Set(totalByDate.keys)
+            .union(subrequestsByDate.keys)
+            .union(errorsByDate.keys)
+            .union(successByDate.keys)
+            .sorted()
+
+        func makeSeries(id: String, title: String, values: [Date: Double]) -> DashboardMetricsSeries {
+            DashboardMetricsSeries(
+                id: id,
+                title: title,
+                points: allDates.compactMap { date in
+                    guard let value = values[date] else { return nil }
+                    return DashboardMetricsPoint(id: "\(id)-\(date.timeIntervalSince1970)", date: date, value: value)
+                }
+            )
+        }
+
+        let series = [
+            makeSeries(id: "requests", title: "Requests", values: totalByDate),
+            makeSeries(id: "success", title: "Success", values: successByDate),
+            makeSeries(id: "errors", title: "Errors", values: errorsByDate),
+            makeSeries(id: "subrequests", title: "Subrequests", values: subrequestsByDate),
+        ].filter { !$0.points.isEmpty }
+
+        return DashboardMetricsChartData(
+            title: "Requests",
+            unit: .count,
+            style: .bar,
+            series: series,
+            emptyMessage: "No requests"
+        )
+    }
+
+    private func fetchPageInvocationStatusChart(
+        accountID: String,
+        projectName: String,
+        timeframe: DashboardMetricsTimeframe
+    ) async throws -> DashboardMetricsChartData {
+        let bucketField = pageMetricsBucketField(for: timeframe)
+        let orderField = "\(bucketField)_ASC"
+        let rows = try await graphQLRows(body: [
+            "operationName": "GetPagesFunctionInvocationStatus",
+            "variables": pageMetricsVariables(accountID: accountID, projectName: projectName, timeframe: timeframe),
+            "query": """
+            query GetPagesFunctionInvocationStatus($accountTag: string!, $datetimeStart: Time, $datetimeEnd: Time, $scriptName: string) {
+              viewer {
+                accounts(filter: {accountTag: $accountTag}) {
+                  pagesFunctionsInvocationsAdaptiveGroups(limit: 10000, filter: {scriptName: $scriptName, datetime_geq: $datetimeStart, datetime_leq: $datetimeEnd}, orderBy: [\(orderField)]) {
+                    sum {
+                      requests
+                      __typename
+                    }
+                    dimensions {
+                      \(bucketField)
+                      status
+                      __typename
+                    }
+                    __typename
+                  }
+                  __typename
+                }
+                __typename
+              }
+            }
+            """
+        ], field: "pagesFunctionsInvocationsAdaptiveGroups")
+
+        return makeGroupedInvocationChart(
+            title: "Invocation statuses",
+            unit: .count,
+            valueField: "requests",
+            groupField: "status",
+            dateField: bucketField,
+            rows: rows,
+            emptyMessage: "No invocation data"
+        )
+    }
+
+    private func fetchPagePercentileChart(
+        accountID: String,
+        projectName: String,
+        timeframe: DashboardMetricsTimeframe,
+        title: String,
+        quantileFields: [String]
+    ) async throws -> DashboardMetricsChartData {
+        let bucketField = pageMetricsBucketField(for: timeframe)
+        let orderField = "\(bucketField)_ASC"
+        let quantileSelection = quantileFields
+            .map { "\($0)\n" }
+            .joined()
+        let rows = try await graphQLRows(body: [
+            "operationName": "GetPagesFunctionPercentiles",
+            "variables": pageMetricsVariables(accountID: accountID, projectName: projectName, timeframe: timeframe),
+            "query": """
+            query GetPagesFunctionPercentiles($accountTag: string!, $datetimeStart: Time, $datetimeEnd: Time, $scriptName: string) {
+              viewer {
+                accounts(filter: {accountTag: $accountTag}) {
+                  pagesFunctionsInvocationsAdaptiveGroups(limit: 10000, filter: {scriptName: $scriptName, datetime_geq: $datetimeStart, datetime_leq: $datetimeEnd}, orderBy: [\(orderField)]) {
+                    quantiles {
+                      \(quantileSelection)
+                      __typename
+                    }
+                    dimensions {
+                      \(bucketField)
+                      __typename
+                    }
+                    __typename
+                  }
+                  __typename
+                }
+                __typename
+              }
+            }
+            """
+        ], field: "pagesFunctionsInvocationsAdaptiveGroups")
+
+        let labels = ["P50", "P90", "P99", "P999"]
+        let series = zip(labels, quantileFields).map { label, field in
+            DashboardMetricsSeries(
+                id: field,
+                title: label,
+                points: rows.compactMap { row in
+                    let dimensions = row["dimensions"] as? [String: Any] ?? [:]
+                    let quantiles = row["quantiles"] as? [String: Any] ?? [:]
+                    guard let date = parseDate(dimensions[bucketField] as? String) else {
+                        return nil
+                    }
+                    let value = doubleValue(quantiles[field]) / 1000
+                    return DashboardMetricsPoint(id: "\(field)-\(date.timeIntervalSince1970)", date: date, value: value)
+                }
+            )
+        }
+        .filter { !$0.points.isEmpty }
+
+        return DashboardMetricsChartData(
+            title: title,
+            unit: .milliseconds,
+            style: .line,
+            series: series,
+            emptyMessage: "No data"
+        )
+    }
+
     private func makeGroupedInvocationChart(
         title: String,
         unit: DashboardMetricsValueUnit,
         valueField: String,
         groupField: String,
+        dateField: String = "datetimeFifteenMinutes",
         rows: [[String: Any]],
         emptyMessage: String
     ) -> DashboardMetricsChartData {
@@ -1471,7 +1892,7 @@ final class DashboardAPIClient: @unchecked Sendable {
         for row in rows {
             let dimensions = row["dimensions"] as? [String: Any] ?? [:]
             let sum = row["sum"] as? [String: Any] ?? [:]
-            guard let date = parseDate(dimensions["datetimeFifteenMinutes"] as? String) else {
+            guard let date = parseDate(dimensions[dateField] as? String) else {
                 continue
             }
             let rawGroup = dimensions[groupField] as? String ?? "Unknown"
@@ -1576,6 +1997,28 @@ final class DashboardAPIClient: @unchecked Sendable {
         return variables
     }
 
+    private func pageMetricsVariables(
+        accountID: String,
+        projectName: String,
+        timeframe: DashboardMetricsTimeframe,
+        includeLookback: Bool = false
+    ) -> [String: Any] {
+        var variables: [String: Any] = [
+            "accountTag": accountID,
+            "datetimeStart": makePlainDateFormatter().string(from: timeframe.start),
+            "datetimeEnd": makePlainDateFormatter().string(from: timeframe.end),
+            "scriptName": projectName,
+        ]
+        if includeLookback {
+            variables["lookbackTime"] = makePlainDateFormatter().string(from: timeframe.start.addingTimeInterval(-timeframe.duration))
+        }
+        return variables
+    }
+
+    private func pageMetricsBucketField(for timeframe: DashboardMetricsTimeframe) -> String {
+        timeframe.duration > 24 * 60 * 60 ? "datetimeHour" : "datetimeFiveMinutes"
+    }
+
     private func weightedQuantileAverage(rows: [[String: Any]], field: String) -> Double {
         let totalRequests = rows.reduce(0) { $0 + intValue(($1["sum"] as? [String: Any])?["requests"]) }
         guard totalRequests > 0 else {
@@ -1612,6 +2055,14 @@ final class DashboardAPIClient: @unchecked Sendable {
         switch value {
         case "clientDisconnected":
             return "Cancelled"
+        case "success":
+            return "Success"
+        case "scriptThrewException":
+            return "Script threw exception"
+        case "exceededResources":
+            return "Exceeded resources"
+        case "internalError":
+            return "Internal error"
         case "responseStreamDisconnected":
             return "Response stream disconnected"
         case "internal":
@@ -1628,6 +2079,15 @@ final class DashboardAPIClient: @unchecked Sendable {
             return "Uncaught Exception"
         default:
             return value.replacingOccurrences(of: "_", with: " ")
+        }
+    }
+
+    private func isSuccessfulPageInvocationStatus(_ status: String) -> Bool {
+        switch status {
+        case "success", "clientDisconnected":
+            true
+        default:
+            false
         }
     }
 

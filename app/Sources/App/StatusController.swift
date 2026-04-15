@@ -1228,9 +1228,6 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
 
     private func openMetricsAction(_ project: DashboardProject) -> (() -> Void)? {
-        guard project.kind == .worker else {
-            return nil
-        }
         return { [weak self] in
             self?.openMetrics(for: project)
         }
