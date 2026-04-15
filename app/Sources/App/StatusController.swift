@@ -1004,16 +1004,17 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
 
     private func makeRecentBuildMenuItem(entry: RecentBuildMenuEntry) -> NSMenuItem {
-        let item = NSMenuItem(title: entry.project.displayName, action: nil, keyEquivalent: "")
+        let project = displayProject(for: entry)
+        let item = NSMenuItem(title: project.displayName, action: nil, keyEquivalent: "")
         item.representedObject = entry
-        item.submenu = makeProjectSubmenu(for: entry.project)
+        item.submenu = makeProjectSubmenu(for: project)
         item.view = WorkersPagesMenuItemView(
-            project: entry.project,
-            isFavorite: isFavorite(entry.project),
-            onClick: openURLAction(entry.project.destinationURL),
-            onShowObservability: openObservabilityAction(entry.project),
-            onToggleFavorite: toggleFavoriteAction(entry.project),
-            onHide: hideProjectAction(entry.project)
+            project: project,
+            isFavorite: isFavorite(project),
+            onClick: openURLAction(project.destinationURL),
+            onShowObservability: openObservabilityAction(project),
+            onToggleFavorite: toggleFavoriteAction(project),
+            onHide: hideProjectAction(project)
         )
         return item
     }
@@ -1034,18 +1035,38 @@ final class StatusController: NSObject, NSMenuDelegate {
     }
 
     private func updateRecentBuildMenuItem(item: NSMenuItem, entry: RecentBuildMenuEntry) {
+        let project = displayProject(for: entry)
         item.representedObject = entry
-        item.title = entry.project.displayName
-        item.submenu = makeProjectSubmenu(for: entry.project)
+        item.title = project.displayName
+        item.submenu = makeProjectSubmenu(for: project)
         (item.view as? WorkersPagesMenuItemView)?.update(
-            project: entry.project,
-            isFavorite: isFavorite(entry.project),
-            onClick: openURLAction(entry.project.destinationURL),
-            onShowObservability: openObservabilityAction(entry.project),
-            onToggleFavorite: toggleFavoriteAction(entry.project),
-            onHide: hideProjectAction(entry.project)
+            project: project,
+            isFavorite: isFavorite(project),
+            onClick: openURLAction(project.destinationURL),
+            onShowObservability: openObservabilityAction(project),
+            onToggleFavorite: toggleFavoriteAction(project),
+            onHide: hideProjectAction(project)
         )
         (item.view as? WorkersPagesMenuItemView)?.syncPointerHoverState()
+    }
+
+    private func displayProject(for entry: RecentBuildMenuEntry) -> DashboardProject {
+        guard entry.isInProgress else {
+            return entry.project
+        }
+        return DashboardProject(
+            accountID: entry.project.accountID,
+            accountEmail: entry.project.accountEmail,
+            kind: entry.project.kind,
+            name: entry.project.name,
+            subtitle: entry.project.subtitle,
+            externalScriptID: entry.project.externalScriptID,
+            latestStatus: "running",
+            latestBranch: entry.project.latestBranch,
+            lastReleaseAt: entry.project.lastReleaseAt,
+            metrics: entry.project.metrics,
+            destinationURL: entry.project.destinationURL
+        )
     }
 
     @discardableResult
